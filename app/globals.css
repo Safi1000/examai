@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+/*
+  ============================================================================
+  ALMANAC — design token system (single source of truth for color + type).
+  Swap the values in @theme and the entire app restyles. No component may
+  hard-code a hex value; everything references a token.
+  ============================================================================
+*/
+
+@theme {
+  /* ---- Type scale: characterful display, clean body, utility mono ---- */
+  --font-display: var(--font-bricolage), "Georgia", serif;
+  --font-body: var(--font-hanken), system-ui, sans-serif;
+  --font-mono: var(--font-spline-mono), ui-monospace, monospace;
+
+  /* ---- Neutral ramp (warm paper) ---- */
+  --color-paper: #f4f1e9; /* page background */
+  --color-surface: #fcfaf4; /* cards / raised surfaces */
+  --color-surface-2: #ece7da; /* inset / secondary surfaces */
+  --color-border: #ded7c7;
+  --color-border-strong: #c9c0ac;
+  --color-ink: #23211c; /* text-primary */
+  --color-ink-2: #57534a; /* text-secondary */
+  --color-ink-3: #8b8676; /* text-muted */
+
+  /* ---- Semantic roles (re-derived values, original logic preserved) ---- */
+  --color-brand: #0e6e68; /* primary: CTA, focus, active nav */
+  --color-brand-strong: #0a5852; /* hover / pressed */
+  --color-brand-soft: #dfeceb; /* tinted brand background */
+  --color-on-brand: #fcfaf4;
+
+  --color-success: #267a4b; /* positive, mastery > 60%, submitted/released */
+  --color-success-soft: #e1efe6;
+  --color-warning: #a76a0c; /* weak topic 50-60%, pending, soft alert */
+  --color-warning-soft: #f4e9d2;
+  --color-error: #b23a2e; /* critical < 50%, destructive, failure */
+  --color-error-soft: #f5e0db;
+  --color-info: #345c8f; /* informational / secondary accent */
+  --color-info-soft: #e1e9f2;
+
+  /* ---- Cohort dots: a clear, distinct set on warm paper (no purple/pink) ---- */
+  --color-cohort-1: #1f7a6b; /* pine */
+  --color-cohort-2: #3f5ba9; /* indigo */
+  --color-cohort-3: #dd6e47; /* coral */
+  --color-cohort-4: #c2941f; /* gold */
+  --color-cohort-5: #6e8b3d; /* olive */
+  --color-cohort-6: #5c7a99; /* slate */
+  --color-cohort-7: #b35545; /* clay */
+  --color-cohort-8: #2f76a0; /* ocean */
+  --color-cohort-9: #1f8a86; /* jade */
+  --color-cohort-10: #b9772a; /* caramel */
+  --color-cohort-11: #3f7d4f; /* forest */
+  --color-cohort-12: #8a6240; /* sepia */
+
+  /* ---- Radii ---- */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.875rem;
+  --radius-xl: 1.25rem;
+
+  /* ---- Motion ---- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ---- Animations (referenced as Tailwind `animate-*`) ---- */
+  --animate-fade-up: fade-up 0.5s var(--ease-out) both;
+  --animate-scale-in: scale-in 0.15s var(--ease-out) both;
+  --animate-slide-in: slide-in 0.25s var(--ease-out) both;
+  --animate-low-pulse: low-pulse 1s ease-in-out infinite;
+}
+
+/* Shadows + texture vars cascade here so they stay swappable */
+:root {
+  --shadow-sm: 0 1px 2px rgba(35, 33, 28, 0.06), 0 1px 1px rgba(35, 33, 28, 0.04);
+  --shadow-md: 0 4px 14px rgba(35, 33, 28, 0.08), 0 1px 3px rgba(35, 33, 28, 0.05);
+  --shadow-lg: 0 18px 40px rgba(35, 33, 28, 0.14), 0 4px 10px rgba(35, 33, 28, 0.07);
+  --ruled-margin: var(--color-brand);
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes low-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Base ---- */
+* { border-color: var(--color-border); }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Subtle paper grain — the one aesthetic risk, kept restrained */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+}
+
+h1, h2, h3, h4, h5 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--color-ink);
+}
+
+.font-mono, code, kbd, .tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Signature: exam-booklet ruled margin */
+.ruled-margin { position: relative; }
+.ruled-margin::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--ruled-margin);
+}
+
+::selection { background: var(--color-brand); color: var(--color-on-brand); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 99px;
+  border: 2px solid var(--color-paper);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
