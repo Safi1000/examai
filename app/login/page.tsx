@@ -144,12 +144,21 @@ export default function StudentLoginPage() {
       />
 
       {/* TechxServe attribution */}
-      <div className="mt-6 flex flex-col items-center gap-1 opacity-50">
-        <img src="/logo.png" alt="TechxServe" className="h-5 w-auto" />
-        <div className="flex items-center gap-2 text-xs text-ink-3">
-          <span>techxserve.com</span>
-          <span>·</span>
-          <span>info@techxserve.com</span>
+      <div className="mt-8 flex flex-col items-center gap-3">
+        <a href="https://techxserve.com" target="_blank" rel="noopener noreferrer" className="hover:opacity-80 transition-opacity">
+          <img src="/logo.png" alt="TechxServe" className="h-9 w-auto" />
+        </a>
+        <p className="text-sm font-bold text-ink">Built by TechxServe</p>
+        <div className="flex items-center gap-3 text-sm font-semibold">
+          <a href="https://techxserve.com" target="_blank" rel="noopener noreferrer"
+             style={{ color: "var(--color-brand)" }} className="hover:underline">
+            techxserve.com
+          </a>
+          <span className="text-ink-3">·</span>
+          <a href="mailto:info@techxserve.com"
+             style={{ color: "var(--color-brand)" }} className="hover:underline">
+            info@techxserve.com
+          </a>
         </div>
       </div>
     </main>
