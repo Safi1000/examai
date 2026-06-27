@@ -45,6 +45,8 @@ export default function AdminTestsPage() {
     const id = store.addTest({
       title: "Untitled test",
       subject: "General",
+      subjectId: null,
+      classId: null,
       durationMinutes: 30,
       cohortId: cohortId ?? null,
       opensAt: new Date(now).toISOString(),

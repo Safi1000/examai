@@ -15,7 +15,7 @@ export function notesConfigured(): boolean {
   return Boolean(CLOUDINARY_CLOUD && CLOUDINARY_NOTES_PRESET);
 }
 
-/** Upload any file (PDF, docx, image…) using the notes preset (resource_type: auto). */
+/** Upload any file (PDF, docx, image…) using the notes preset (resource_type: raw). */
 export async function uploadNote(file: File): Promise<{ url: string; fileType: string; fileName: string }> {
   if (!CLOUDINARY_CLOUD) {
     throw new Error("Cloudinary is not configured. Set NEXT_PUBLIC_CLOUDINARY_CLOUD.");
@@ -25,7 +25,7 @@ export async function uploadNote(file: File): Promise<{ url: string; fileType: s
   form.append("upload_preset", CLOUDINARY_NOTES_PRESET);
 
   const res = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/auto/upload`,
+    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD}/raw/upload`,
     { method: "POST", body: form },
   );
   if (!res.ok) {

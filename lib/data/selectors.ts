@@ -16,10 +16,14 @@ export const submissionById = (db: Database, id: string) =>
 export const studentsInCohort = (db: Database, cohortId: string) =>
   db.students.filter((s) => s.cohortId === cohortId);
 
-/** Tests a student can see: their cohort or open-to-all, never drafts. */
+/** Tests a student can see: cohort + class + subject match, never drafts. */
 export function testsForStudent(db: Database, student: Student): Test[] {
   return db.tests.filter(
-    (t) => t.status !== "draft" && (t.cohortId === null || t.cohortId === student.cohortId),
+    (t) =>
+      t.status !== "draft" &&
+      (t.cohortId === null || t.cohortId === student.cohortId) &&
+      (t.classId === null || student.classIds.includes(t.classId)) &&
+      (t.subjectId === null || student.subjectIds.includes(t.subjectId)),
   );
 }
 

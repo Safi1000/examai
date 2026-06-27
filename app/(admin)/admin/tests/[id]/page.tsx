@@ -40,6 +40,8 @@ export default function TestEditorPage() {
       ? {
           title: test.title,
           subject: test.subject,
+          subjectId: test.subjectId ?? "",
+          classId: test.classId ?? "",
           durationMinutes: test.durationMinutes,
           cohortId: test.cohortId ?? "",
           opensAt: toLocalInput(test.opensAt),
@@ -73,7 +75,9 @@ export default function TestEditorPage() {
     if (!form || !canSave) return;
     store.updateTest(id, {
       title: form.title.trim(),
-      subject: form.subject.trim() || "General",
+      subject: form.subject || "General",
+      subjectId: form.subjectId || null,
+      classId: form.classId || null,
       durationMinutes: Math.max(1, form.durationMinutes),
       cohortId: form.cohortId || null,
       opensAt: fromLocalInput(form.opensAt),
@@ -129,15 +133,52 @@ export default function TestEditorPage() {
           <CardHeader><h2 className="font-bold text-ink">Details</h2></CardHeader>
           <CardBody className="space-y-4">
             <Input label="Title" value={form.title} onChange={(e) => set("title", e.target.value)} required />
-            <div className="grid grid-cols-2 gap-3">
-              <Input label="Subject" value={form.subject} onChange={(e) => set("subject", e.target.value)} />
-              <Input label="Duration (min)" type="number" min={1} value={form.durationMinutes} onChange={(e) => set("durationMinutes", Number(e.target.value))} />
-            </div>
+            <Input label="Duration (min)" type="number" min={1} value={form.durationMinutes} onChange={(e) => set("durationMinutes", Number(e.target.value))} />
             <Input label="Test code" value={form.testCode} onChange={(e) => set("testCode", e.target.value)} />
-            <Select label="Cohort" value={form.cohortId} onChange={(e) => set("cohortId", e.target.value)}>
+            <Select
+              label="Cohort"
+              value={form.cohortId}
+              onChange={(e) => {
+                set("cohortId", e.target.value);
+                set("classId", "");
+                set("subjectId", "");
+                set("subject", "General");
+              }}
+            >
               <option value="">Open to all cohorts</option>
               {db.cohorts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
+            {(() => {
+              const cohort = db.cohorts.find((c) => c.id === form.cohortId);
+              const classes = cohort ? db.classes.filter((cl) => cohort.classIds.includes(cl.id)) : [];
+              const subjects = cohort ? db.subjects.filter((s) => cohort.subjectIds.includes(s.id)) : db.subjects;
+              return (
+                <>
+                  {classes.length > 0 && (
+                    <Select
+                      label="Class"
+                      value={form.classId}
+                      onChange={(e) => set("classId", e.target.value)}
+                    >
+                      <option value="">All classes in cohort</option>
+                      {classes.map((cl) => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
+                    </Select>
+                  )}
+                  <Select
+                    label="Subject"
+                    value={form.subjectId}
+                    onChange={(e) => {
+                      const subj = db.subjects.find((s) => s.id === e.target.value);
+                      set("subjectId", e.target.value);
+                      set("subject", subj?.name ?? "General");
+                    }}
+                  >
+                    <option value="">No subject</option>
+                    {subjects.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </Select>
+                </>
+              );
+            })()}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1.5 block text-sm font-semibold text-ink-2">Opens</label>

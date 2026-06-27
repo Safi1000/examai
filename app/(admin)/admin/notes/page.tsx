@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/admin/PageHeader";
 import { Card, Button, Input, Select, Label, Modal, EmptyState, Icon } from "@/components/ui";
 import type { Note, NoteAssignment } from "@/types";
 import { uploadNote, notesConfigured } from "@/lib/cloudinary";
-import { cn } from "@/lib/cn";
 
 const ACCEPT = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp";
 
@@ -192,11 +191,9 @@ export default function NotesPage() {
                   </div>
                   <div className="flex shrink-0 gap-1">
                     <a
-                      href={note.fileUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                      href={`/api/download?url=${encodeURIComponent(note.fileUrl)}&name=${encodeURIComponent(note.fileName)}`}
                       className="flex h-9 w-9 items-center justify-center rounded text-ink-3 hover:bg-surface-2 hover:text-ink"
-                      aria-label="Open file"
+                      aria-label="Download file"
                     >
                       <Icon.ChevronRight className="h-4 w-4" />
                     </a>

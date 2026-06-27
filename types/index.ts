@@ -127,6 +127,10 @@ export interface Test {
   durationMinutes: number;
   /** null = open to all cohorts. */
   cohortId: string | null;
+  /** null = open to all classes within the cohort. */
+  classId: string | null;
+  /** null = open to all subjects within the cohort. */
+  subjectId: string | null;
   opensAt: string; // ISO
   closesAt: string; // ISO
   testCode: string;

@@ -142,6 +142,16 @@ export default function StudentLoginPage() {
         className="mt-4 h-8 w-24 rounded opacity-0"
         tabIndex={-1}
       />
+
+      {/* TechxServe attribution */}
+      <div className="mt-6 flex flex-col items-center gap-1 opacity-50">
+        <img src="/logo.png" alt="TechxServe" className="h-5 w-auto" />
+        <div className="flex items-center gap-2 text-xs text-ink-3">
+          <span>techxserve.com</span>
+          <span>·</span>
+          <span>info@techxserve.com</span>
+        </div>
+      </div>
     </main>
   );
 }

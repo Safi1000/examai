@@ -6,6 +6,10 @@ import { studentById } from "@/lib/data/selectors";
 import { EmptyState, Icon } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
+function downloadFile(url: string, fileName: string) {
+  window.location.href = `/api/download?url=${encodeURIComponent(url)}&name=${encodeURIComponent(fileName)}`;
+}
+
 function fileIcon(type: string) {
   if (type.startsWith("image/")) return "🖼️";
   if (type.includes("pdf")) return "📄";
@@ -116,11 +120,8 @@ export default function StudentNotesPage() {
                           </p>
                         </div>
                       </div>
-                      <a
-                        href={note.fileUrl}
-                        download={note.fileName}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        onClick={() => downloadFile(note.fileUrl, note.fileName)}
                         className={cn(
                           "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold",
                           "bg-brand-soft text-brand hover:opacity-80 transition-opacity",
@@ -129,7 +130,7 @@ export default function StudentNotesPage() {
                       >
                         <Icon.Download className="h-4 w-4" />
                         <span className="hidden sm:inline">Download</span>
-                      </a>
+                      </button>
                     </div>
                   );
                 })}

@@ -226,6 +226,8 @@ function testPatchToRow(patch: Partial<Omit<Test, "id" | "createdAt" | "question
   if (patch.subject !== undefined) row.subject = patch.subject;
   if (patch.durationMinutes !== undefined) row.duration_minutes = patch.durationMinutes;
   if (patch.cohortId !== undefined) row.cohort_id = patch.cohortId;
+  if (patch.classId !== undefined) row.class_id = patch.classId;
+  if (patch.subjectId !== undefined) row.subject_id = patch.subjectId;
   if (patch.opensAt !== undefined) row.opens_at = patch.opensAt;
   if (patch.closesAt !== undefined) row.closes_at = patch.closesAt;
   if (patch.testCode !== undefined) row.test_code = patch.testCode;
@@ -311,6 +313,8 @@ class Store {
       subject: t.subject as string,
       durationMinutes: t.duration_minutes as number,
       cohortId: (t.cohort_id as string) ?? null,
+      classId: (t.class_id as string) ?? null,
+      subjectId: (t.subject_id as string) ?? null,
       opensAt: t.opens_at as string,
       closesAt: t.closes_at as string,
       testCode: t.test_code as string,
@@ -597,6 +601,8 @@ class Store {
         subject: input.subject,
         duration_minutes: input.durationMinutes,
         cohort_id: input.cohortId,
+        class_id: input.classId,
+        subject_id: input.subjectId,
         opens_at: input.opensAt,
         closes_at: input.closesAt,
         test_code: input.testCode,
