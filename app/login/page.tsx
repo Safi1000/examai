@@ -89,8 +89,8 @@ export default function StudentLoginPage() {
             E
           </div>
           <div>
-            <p className="text-lg font-bold leading-none tracking-tight">Examia</p>
-            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "rgba(223,236,235,0.5)" }}>
+            <p className="text-lg font-bold leading-none tracking-tight" style={{ color: "white" }}>Examia</p>
+            <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.45)" }}>
               {COMPANY_NAME}
             </p>
           </div>
@@ -100,10 +100,10 @@ export default function StudentLoginPage() {
         <div className="relative space-y-7">
           <h2
             className="text-[30px] font-bold leading-tight tracking-tight"
-            style={{ fontFamily: "var(--font-display, var(--font-bricolage))" }}
+            style={{ fontFamily: "var(--font-display, var(--font-bricolage))", color: "white" }}
           >
             Start from scratch.<br />
-            <span style={{ color: "var(--color-brand-soft, #dfeceb)" }}>Finish exam ready.</span>
+            <span style={{ color: "rgba(255,255,255,0.75)" }}>Finish exam ready.</span>
           </h2>
 
           <p className="max-w-sm text-[14px] leading-relaxed" style={{ color: "rgba(223,236,235,0.6)" }}>
@@ -122,7 +122,7 @@ export default function StudentLoginPage() {
           </div>
         </div>
 
-        <p className="relative text-[12px]" style={{ color: "rgba(14,110,104,0.6)" }}>
+        <p className="relative text-[12px]" style={{ color: "rgba(255,255,255,0.28)" }}>
           Examia · A TechxServe Product
         </p>
       </div>
