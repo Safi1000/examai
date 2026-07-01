@@ -6,7 +6,7 @@ import { awardedMarks, scoreMcq, totalMarks } from "@/lib/scoring";
 
 export type GradeLetter = "A*" | "A" | "B" | "C" | "D" | "E" | "U";
 
-/** Grade bands (Hamza Teaches standard). A 100% result must return A*. */
+/** Grade bands. A 100% result must return A*. */
 export function gradeLetter(percent: number): GradeLetter {
   if (percent >= 92) return "A*";
   if (percent >= 85) return "A";

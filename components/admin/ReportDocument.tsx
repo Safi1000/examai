@@ -500,7 +500,7 @@ export function ReportDocument({
 
         {/* ── Footer ── */}
         <View style={styles.footer}>
-          <Text style={styles.footerText}>Hamza Teaches · Confidential</Text>
+          <Text style={styles.footerText}>Confidential</Text>
           <Text style={styles.footerText}>Generated {today}</Text>
         </View>
 

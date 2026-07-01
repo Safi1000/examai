@@ -3,11 +3,9 @@
  * Swap COMPANY_NAME and the slug derives automatically; it appears on the
  * login hero, the admin header, and the export filename.
  */
-export const COMPANY_NAME = "Hamza Teaches";
+export const COMPANY_NAME = "";
 
-export const COMPANY_SLUG = COMPANY_NAME.toLowerCase()
-  .replace(/[^a-z0-9]+/g, "-")
-  .replace(/(^-|-$)/g, "");
+export const COMPANY_SLUG = "examia";
 
 /** Persistent build credit shown on every screen. */
 export const BUILD_CREDIT = "Developed by Techxserve";
