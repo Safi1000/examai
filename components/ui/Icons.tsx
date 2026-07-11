@@ -48,6 +48,11 @@ export const Icon = {
   Flag: (p: P) => <Base {...p}><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></Base>,
   Warn: (p: P) => <Base {...p}><path d="M12 4 2.5 20h19L12 4ZM12 10v4M12 17.5v.5" /></Base>,
   Refresh: (p: P) => <Base {...p}><path d="M4 9a8 8 0 0 1 14-3l2 2M20 15a8 8 0 0 1-14 3l-2-2M18 4v4h-4M6 20v-4h4" /></Base>,
+  Bell: (p: P) => <Base {...p}><path d="M18 16v-5a6 6 0 0 0-12 0v5l-2 2h16l-2-2ZM10 20a2 2 0 0 0 4 0" /></Base>,
+  BellOff: (p: P) => <Base {...p}><path d="M8.5 6.5A6 6 0 0 1 18 11v5M6 11v5l-2 2h13M10 20a2 2 0 0 0 4 0M3 3l18 18" /></Base>,
+  CheckDouble: (p: P) => <Base {...p}><path d="m2 12 4 4 8-9M12 16l1 1 8-9" /></Base>,
+  Award: (p: P) => <Base {...p}><circle cx="12" cy="9" r="5" /><path d="M9 13.5 8 21l4-2 4 2-1-7.5" /></Base>,
+  Calendar: (p: P) => <Base {...p}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 9h18M8 3v4M16 3v4" /></Base>,
   Palette: (p: P) => (
     <Base {...p}>
       <path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-.9-.5-1.3-.3-.4-.5-.8-.5-1.2 0-1 .8-1.7 1.8-1.7H17a4 4 0 0 0 4-4c0-4.4-4-7.8-9-7.8Z" />

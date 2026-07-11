@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import type { Question, TestStatus } from "@/types";
 import { useDatabase, useStore } from "@/lib/data/store";
 import { testById } from "@/lib/data/selectors";
@@ -24,33 +24,67 @@ function stripDraft(d: QuestionDraft): Omit<Question, "id" | "order"> {
   void _s;
   return rest as Omit<Question, "id" | "order">;
 }
+function stripQuestion(q: Question): Omit<Question, "id" | "order"> {
+  const { id: _id, order: _o, ...rest } = q;
+  void _id;
+  void _o;
+  return rest as Omit<Question, "id" | "order">;
+}
+const reindex = (qs: Question[]): Question[] => qs.map((q, i) => ({ ...q, order: i }));
 
 export default function TestEditorPage() {
   const params = useParams();
   const id = String(params.id);
+  const isNew = id === "new";
   const db = useDatabase();
   const store = useStore();
+  const router = useRouter();
   const { toast } = useToast();
 
-  const test = testById(db, id);
+  const existing = isNew ? null : testById(db, id);
+
+  // "New" mode: nothing touches the DB until Create. Hold a synthetic test code
+  // + default window, and buffer questions locally until the admin saves.
+  const [newMeta] = useState(() => ({
+    testCode: `NEW-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+    opensAt: new Date().toISOString(),
+    closesAt: new Date(Date.now() + 7 * 86_400_000).toISOString(),
+  }));
+  const [localQuestions, setLocalQuestions] = useState<Question[]>([]);
 
   // Settings form (local until Save).
-  const [form, setForm] = useState(() =>
-    test
+  const [form, setForm] = useState(() => {
+    if (isNew) {
+      return {
+        title: "",
+        subject: "General",
+        subjectId: "",
+        classId: "",
+        durationMinutes: 30,
+        cohortId: "",
+        opensAt: toLocalInput(newMeta.opensAt),
+        closesAt: toLocalInput(newMeta.closesAt),
+        releaseAt: "",
+        testCode: newMeta.testCode,
+        status: "draft" as TestStatus,
+      };
+    }
+    return existing
       ? {
-          title: test.title,
-          subject: test.subject,
-          subjectId: test.subjectId ?? "",
-          classId: test.classId ?? "",
-          durationMinutes: test.durationMinutes,
-          cohortId: test.cohortId ?? "",
-          opensAt: toLocalInput(test.opensAt),
-          closesAt: toLocalInput(test.closesAt),
-          testCode: test.testCode,
-          status: test.status,
+          title: existing.title,
+          subject: existing.subject,
+          subjectId: existing.subjectId ?? "",
+          classId: existing.classId ?? "",
+          durationMinutes: existing.durationMinutes,
+          cohortId: existing.cohortId ?? "",
+          opensAt: toLocalInput(existing.opensAt),
+          closesAt: toLocalInput(existing.closesAt),
+          releaseAt: existing.releaseAt ? toLocalInput(existing.releaseAt) : "",
+          testCode: existing.testCode,
+          status: existing.status,
         }
-      : null,
-  );
+      : null;
+  });
 
   const [qModalOpen, setQModalOpen] = useState(false);
   const [editingQ, setEditingQ] = useState<Question | null>(null);
@@ -58,9 +92,12 @@ export default function TestEditorPage() {
   const [deleteQId, setDeleteQId] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
-  const questions = useMemo(() => (test ? [...test.questions].sort((a, b) => a.order - b.order) : []), [test]);
+  const questions = useMemo(
+    () => (isNew ? localQuestions : existing ? [...existing.questions].sort((a, b) => a.order - b.order) : []),
+    [isNew, localQuestions, existing],
+  );
 
-  if (!test || !form) {
+  if ((!isNew && !existing) || !form) {
     return (
       <div className="px-4 py-6">
         <PageHeader title="Test not found" back={{ href: "/admin/tests", label: "Tests" }} />
@@ -69,11 +106,28 @@ export default function TestEditorPage() {
     );
   }
 
-  const canSave = form.title.trim().length > 0 && questions.length > 0;
+  // Release-at is optional; if set it must be at/after Close. The "not in the
+  // past" check runs at save time (see below) — Date.now() is impure in render.
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const releaseError = (() => {
+    if (!form.releaseAt) return null;
+    const rel = new Date(form.releaseAt).getTime();
+    if (Number.isNaN(rel)) return "Enter a valid date and time.";
+    if (form.closesAt && rel < new Date(form.closesAt).getTime()) return "Release can't be before the test closes.";
+    return null;
+  })();
+
+  // New tests only need a title to be created (questions can be added after);
+  // existing tests keep the "at least one question" rule before saving.
+  const canSave = form.title.trim().length > 0 && !releaseError && (isNew || questions.length > 0);
 
   function saveSettings() {
     if (!form || !canSave) return;
-    store.updateTest(id, {
+    if (form.releaseAt && new Date(form.releaseAt).getTime() < Date.now()) {
+      toast("Release time can't be in the past.", "error");
+      return;
+    }
+    const settings = {
       title: form.title.trim(),
       subject: form.subject || "General",
       subjectId: form.subjectId || null,
@@ -82,9 +136,19 @@ export default function TestEditorPage() {
       cohortId: form.cohortId || null,
       opensAt: fromLocalInput(form.opensAt),
       closesAt: fromLocalInput(form.closesAt),
+      releaseAt: form.releaseAt ? fromLocalInput(form.releaseAt) : null,
       testCode: form.testCode.trim(),
       status: form.status,
-    });
+    };
+    if (isNew) {
+      // The insert happens here — never on opening the editor.
+      const newId = store.addTest(settings);
+      localQuestions.forEach((q) => store.addQuestion(newId, stripQuestion(q)));
+      toast("Test created.", "success");
+      router.replace(`/admin/tests/${newId}`);
+      return;
+    }
+    store.updateTest(id, settings);
     toast("Test saved.", "success");
   }
 
@@ -93,7 +157,8 @@ export default function TestEditorPage() {
     const target = index + dir;
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target], next[index]];
-    store.reorderQuestions(id, next.map((q) => q.id));
+    if (isNew) setLocalQuestions(reindex(next));
+    else store.reorderQuestions(id, next.map((q) => q.id));
   }
 
   function onDrop(targetIndex: number) {
@@ -101,7 +166,8 @@ export default function TestEditorPage() {
     const next = [...questions];
     const [moved] = next.splice(dragIndex, 1);
     next.splice(targetIndex, 0, moved);
-    store.reorderQuestions(id, next.map((q) => q.id));
+    if (isNew) setLocalQuestions(reindex(next));
+    else store.reorderQuestions(id, next.map((q) => q.id));
     setDragIndex(null);
   }
 
@@ -111,19 +177,19 @@ export default function TestEditorPage() {
   return (
     <div className="px-4 py-6 sm:px-6">
       <PageHeader
-        title="Edit test"
-        subtitle={test.title}
+        title={isNew ? "New test" : "Edit test"}
+        subtitle={isNew ? undefined : form.title}
         back={{ href: "/admin/tests", label: "Tests" }}
         actions={
           <>
-            <Pill>{test.testCode}</Pill>
-            <Button onClick={saveSettings} disabled={!canSave}>Save</Button>
+            <Pill>{form.testCode}</Pill>
+            <Button onClick={saveSettings} disabled={!canSave}>{isNew ? "Create test" : "Save"}</Button>
           </>
         }
       />
       {!canSave && (
         <p className="mb-4 rounded-md border border-warning/30 bg-warning-soft px-3 py-2 text-sm text-warning">
-          Add a title and at least one question to save this test.
+          {isNew ? "Add a title to create this test." : "Add a title and at least one question to save this test."}
         </p>
       )}
 
@@ -189,10 +255,43 @@ export default function TestEditorPage() {
                 <input type="datetime-local" value={form.closesAt} onChange={(e) => set("closesAt", e.target.value)} className="h-12 w-full rounded-md border border-border-strong bg-surface px-3 text-ink" />
               </div>
             </div>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="block text-sm font-semibold text-ink-2">Release results at</label>
+                <span className="font-mono text-[11px] text-ink-3">{tz}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="datetime-local"
+                  value={form.releaseAt}
+                  onChange={(e) => set("releaseAt", e.target.value)}
+                  className="h-12 w-full rounded-md border border-border-strong bg-surface px-3 text-ink"
+                />
+                {form.releaseAt && (
+                  <button
+                    type="button"
+                    onClick={() => set("releaseAt", "")}
+                    className="flex h-12 w-11 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink"
+                    aria-label="Clear release time"
+                    title="Clear (manual release only)"
+                  >
+                    <Icon.Close className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              {releaseError ? (
+                <p className="mt-1.5 text-xs font-medium text-error">{releaseError}</p>
+              ) : (
+                <p className="mt-1.5 text-xs text-ink-3">
+                  Leave empty to release results manually. Results auto-release at this time even with no one logged in.
+                </p>
+              )}
+            </div>
             <Select label="Status" value={form.status} onChange={(e) => set("status", e.target.value as TestStatus)}>
               <option value="draft">Draft</option>
               <option value="active">Active</option>
               <option value="closed">Closed</option>
+              <option value="cancelled">Cancelled</option>
             </Select>
           </CardBody>
         </Card>
@@ -265,8 +364,15 @@ export default function TestEditorPage() {
         onClose={() => setQModalOpen(false)}
         initial={editingQ ? ({ ...editingQ } as QuestionDraft) : null}
         onSave={(draft) => {
-          if (editingQ) store.updateQuestion(id, editingQ.id, stripDraft(draft));
-          else store.addQuestion(id, stripDraft(draft));
+          const body = stripDraft(draft);
+          if (isNew) {
+            if (editingQ) {
+              setLocalQuestions((qs) => qs.map((q) => (q.id === editingQ.id ? ({ ...body, id: q.id, order: q.order } as Question) : q)));
+            } else {
+              setLocalQuestions((qs) => [...qs, { ...body, id: crypto.randomUUID(), order: qs.length } as Question]);
+            }
+          } else if (editingQ) store.updateQuestion(id, editingQ.id, body);
+          else store.addQuestion(id, body);
           setQModalOpen(false);
           toast(editingQ ? "Question updated." : "Question added.", "success");
         }}
@@ -275,7 +381,27 @@ export default function TestEditorPage() {
       <ImportBankModal
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onImport={(ids) => { store.importBankItems(id, ids); toast(`${ids.length} question${ids.length === 1 ? "" : "s"} imported.`, "success"); }}
+        onImport={(ids) => {
+          if (isNew) {
+            setLocalQuestions((qs) => {
+              let order = qs.length;
+              const added = ids
+                .map((bid) => {
+                  const item = db.bank.find((b) => b.id === bid);
+                  if (!item) return null;
+                  const { subject: _s, id: _i, ...rest } = item;
+                  void _s;
+                  void _i;
+                  return { ...rest, id: crypto.randomUUID(), order: order++ } as Question;
+                })
+                .filter((q): q is Question => q !== null);
+              return [...qs, ...added];
+            });
+          } else {
+            store.importBankItems(id, ids);
+          }
+          toast(`${ids.length} question${ids.length === 1 ? "" : "s"} imported.`, "success");
+        }}
       />
 
       <Modal
@@ -285,7 +411,13 @@ export default function TestEditorPage() {
         footer={
           <>
             <Button variant="secondary" onClick={() => setDeleteQId(null)}>Cancel</Button>
-            <Button variant="danger" onClick={() => { if (deleteQId) store.deleteQuestion(id, deleteQId); setDeleteQId(null); }}>Delete</Button>
+            <Button variant="danger" onClick={() => {
+              if (deleteQId) {
+                if (isNew) setLocalQuestions((qs) => reindex(qs.filter((q) => q.id !== deleteQId)));
+                else store.deleteQuestion(id, deleteQId);
+              }
+              setDeleteQId(null);
+            }}>Delete</Button>
           </>
         }
       >

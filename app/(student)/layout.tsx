@@ -5,11 +5,13 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useDatabase, useDataReady } from "@/lib/data/store";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { studentById } from "@/lib/data/selectors";
 import { BrandMark } from "@/components/Brand";
 import { CohortTag } from "@/components/ui";
 import { Icon } from "@/components/ui";
 import { cohortById } from "@/lib/data/selectors";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { cn } from "@/lib/cn";
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
@@ -18,6 +20,8 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const pathname = usePathname();
   const db = useDatabase();
   const ready = useDataReady();
+
+  useRealtimeSync();
 
   useEffect(() => {
     if (!initializing && (!session || session.role !== "student")) router.replace("/login");
@@ -73,6 +77,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
                   </Link>
                 );
               })}
+              <NotificationBell />
               <button
                 onClick={() => { logout(); router.replace("/login"); }}
                 className="flex h-11 w-11 items-center justify-center rounded-md text-ink-2 hover:bg-surface-2 hover:text-ink"

@@ -54,7 +54,11 @@ export default function TestRunnerPage() {
     if (boot.answers && boot.answers.length === test.questions.length) return boot.answers;
     return test.questions.map((q) => ({ questionId: q.id, type: q.type }) as Answer);
   });
-  const [index, setIndex] = useState(boot.index);
+  // Clamp the restored index: a stale draft may point past a now-shorter test.
+  const [index, setIndex] = useState(() => {
+    const max = test ? Math.max(0, test.questions.length - 1) : 0;
+    return Math.min(Math.max(0, boot.index), max);
+  });
   const [confirmOpen, setConfirmOpen] = useState(false);
   const submittedRef = useRef(false);
   const prevState = useRef<string>("normal");
@@ -119,9 +123,18 @@ export default function TestRunnerPage() {
   if (existing) return <RunnerNotice title="Already submitted" message="You've already done this one." />;
   if (window === "future") return <RunnerNotice title="Not open yet" message="Not live yet. Check back at the start time." />;
   if (window === "closed") return <RunnerNotice title="Test closed" message="You missed the window." />;
+  if (test.questions.length === 0) {
+    return <RunnerNotice title="No questions yet" message="This test currently has no questions." />;
+  }
 
-  const q = test.questions[index];
-  const answer = answers[index];
+  // Defensive: after clamping this is always in-bounds, but never render an
+  // undefined question (would throw on q.id).
+  const safeIndex = Math.min(Math.max(0, index), test.questions.length - 1);
+  const q = test.questions[safeIndex];
+  const answer = answers[safeIndex];
+  if (!q) {
+    return <RunnerNotice title="No questions yet" message="This test currently has no questions." />;
+  }
   const answeredCount = answers.filter(isAnswered).length;
   const isLast = index === test.questions.length - 1;
 

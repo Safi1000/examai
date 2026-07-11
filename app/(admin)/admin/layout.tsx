@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useDataReady } from "@/lib/data/store";
 import { useSessionTimeout } from "@/hooks/useSessionTimeout";
+import { useRealtimeSync } from "@/hooks/useRealtimeSync";
 import { useToast } from "@/components/toast";
 import { AdminFilterProvider } from "@/lib/admin-filter";
 import { AdminLogin } from "@/components/admin/AdminLogin";
 import { Sidebar } from "@/components/admin/Sidebar";
 import { Icon } from "@/components/ui";
 import { Wordmark } from "@/components/Brand";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 const IDLE_MS = 30 * 60 * 1000; // 30-minute idle session timeout
 
@@ -23,6 +25,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const isAdmin = session?.role === "admin";
 
+  useRealtimeSync();
   useSessionTimeout(
     () => {
       logout();
@@ -74,13 +77,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </button>
               <div className="md:hidden"><Wordmark markSize={22} /></div>
             </div>
-            <button
-              onClick={() => { logout(); router.replace("/login"); }}
-              className="flex h-11 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
-            >
-              <Icon.Logout className="h-[18px] w-[18px]" />
-              <span className="hidden sm:inline">Sign out</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <NotificationBell />
+              <button
+                onClick={() => { logout(); router.replace("/login"); }}
+                className="flex h-11 items-center gap-1.5 rounded-md px-3 text-sm font-semibold text-ink-2 hover:bg-surface-2 hover:text-ink"
+              >
+                <Icon.Logout className="h-[18px] w-[18px]" />
+                <span className="hidden sm:inline">Sign out</span>
+              </button>
+            </div>
           </header>
 
           <main className="flex-1">{children}</main>

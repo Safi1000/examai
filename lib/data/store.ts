@@ -230,6 +230,7 @@ function testPatchToRow(patch: Partial<Omit<Test, "id" | "createdAt" | "question
   if (patch.subjectId !== undefined) row.subject_id = patch.subjectId;
   if (patch.opensAt !== undefined) row.opens_at = patch.opensAt;
   if (patch.closesAt !== undefined) row.closes_at = patch.closesAt;
+  if (patch.releaseAt !== undefined) row.release_at = patch.releaseAt;
   if (patch.testCode !== undefined) row.test_code = patch.testCode;
   if (patch.status !== undefined) row.status = patch.status;
   return row;
@@ -317,6 +318,7 @@ class Store {
       subjectId: (t.subject_id as string) ?? null,
       opensAt: t.opens_at as string,
       closesAt: t.closes_at as string,
+      releaseAt: (t.release_at as string) ?? null,
       testCode: t.test_code as string,
       status: t.status as TestStatus,
       createdAt: t.created_at as string,
@@ -605,6 +607,7 @@ class Store {
         subject_id: input.subjectId,
         opens_at: input.opensAt,
         closes_at: input.closesAt,
+        release_at: input.releaseAt ?? null,
         test_code: input.testCode,
         status: input.status,
         created_at: createdAt,
@@ -860,6 +863,43 @@ class Store {
   deleteSubmission(submissionId: string) {
     this.commit((d) => { d.submissions = d.submissions.filter((s) => s.id !== submissionId); });
     this.run(supabase().from("submissions").delete().eq("id", submissionId), "deleteSubmission");
+  }
+  /**
+   * Cache-only refresh of one submission from the server (drives realtime sync —
+   * it NEVER writes back, so it can't loop with the change feed). Upserts the row
+   * with its answers when present; removes it from the cache when it's gone. This
+   * is how an auto/scheduled release flips a cached "Awaiting" to "Released"
+   * without a manual refresh.
+   */
+  async refreshSubmission(submissionId: string) {
+    const { data, error } = await supabase()
+      .from("submissions")
+      .select("*, answers(*)")
+      .eq("id", submissionId)
+      .maybeSingle();
+    if (error) {
+      this.report(`refreshSubmission: ${error.message}`);
+      return;
+    }
+    if (!data) {
+      this.commit((d) => { d.submissions = d.submissions.filter((s) => s.id !== submissionId); });
+      return;
+    }
+    const sub = mapSubmission(data as Row);
+    this.commit((d) => {
+      const i = d.submissions.findIndex((s) => s.id === submissionId);
+      if (i >= 0) {
+        // Never downgrade known answers to an empty set: a student can't read
+        // their own answers until results are released (RLS hides them), so a
+        // refresh of a just-submitted row returns none — keep the optimistic ones.
+        d.submissions[i] = {
+          ...sub,
+          answers: sub.answers.length ? sub.answers : d.submissions[i].answers,
+        };
+      } else {
+        d.submissions.push(sub);
+      }
+    });
   }
 
   // ---- Announcements ---------------------------------------------------

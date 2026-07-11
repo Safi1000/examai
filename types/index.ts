@@ -118,7 +118,16 @@ export type QuestionBankItem = QuestionCommon & QuestionVariant & { subject: str
 // 4. Tests
 // ----------------------------------------------------------------------------
 
-export type TestStatus = "draft" | "active" | "closed";
+/**
+ * Stored lifecycle state.
+ *  - draft     : not published (hidden from students)
+ *  - active    : published & schedule-driven — the *effective* status (scheduled
+ *                / open / closed) is derived from opensAt/closesAt at read time
+ *  - closed    : manually force-closed early (overrides the schedule)
+ *  - cancelled : manually cancelled by an admin (overrides the schedule)
+ * See `effectiveTestStatus()` in lib/time.ts for the derived display status.
+ */
+export type TestStatus = "draft" | "active" | "closed" | "cancelled";
 
 export interface Test {
   id: string;
@@ -133,6 +142,8 @@ export interface Test {
   subjectId: string | null;
   opensAt: string; // ISO
   closesAt: string; // ISO
+  /** When results auto-release. null = manual release only. Stored UTC. */
+  releaseAt?: string | null;
   testCode: string;
   status: TestStatus;
   questions: Question[];
@@ -213,4 +224,63 @@ export interface TestStats {
   submissionCount: number;
   averagePercent: number | null;
   completionPercent: number;
+}
+
+// ----------------------------------------------------------------------------
+// 9. Notifications
+// ----------------------------------------------------------------------------
+
+/** Which inbox a notification belongs to. */
+export type NotificationAudience = "student" | "admin";
+
+/**
+ * Event taxonomy. The DB stores a free-text `type`; the UI maps these known
+ * values to an icon/tone and falls back gracefully for anything new.
+ */
+export type NotificationType =
+  | "test_posted"
+  | "test_updated"
+  | "test_deleted"
+  | "test_reminder"
+  | "test_started"
+  | "test_closing"
+  | "test_closed"
+  | "test_submitted"
+  | "late_submission"
+  | "notes_uploaded"
+  | "notes_updated"
+  | "notes_deleted"
+  | "result_graded"
+  | "result_released"
+  | "announcement"
+  | "cohort_enrollment"
+  | "cohort_changed"
+  | "integrity_report"
+  | "grade_updated"
+  | "system";
+
+/**
+ * A single delivered notification (one row per recipient). Mirrors the
+ * `notifications` table; created only server-side (triggers + cron) and read
+ * scoped by RLS. `metadata` carries event-specific extras (subject, times, …).
+ */
+export interface Notification {
+  id: string;
+  audience: NotificationAudience;
+  /** Present on student-audience rows; null on admin rows. */
+  recipientStudentId: string | null;
+  cohortId: string | null;
+  subjectId: string | null;
+  title: string;
+  message: string;
+  type: NotificationType | (string & {});
+  actionUrl: string | null;
+  relatedTestId: string | null;
+  relatedNoteId: string | null;
+  relatedSubmissionId: string | null;
+  metadata: Record<string, unknown>;
+  isRead: boolean;
+  readAt: string | null;
+  createdAt: string;
+  expiresAt: string | null;
 }

@@ -10,6 +10,7 @@ import { TestCard } from "@/components/student/TestCard";
 import { EmptyState, Icon } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/Button";
 import { testWindow } from "@/lib/time";
+import { useNow } from "@/hooks/useNow";
 
 function greeting(d = new Date()) {
   const h = d.getHours();
@@ -21,7 +22,7 @@ function greeting(d = new Date()) {
 export default function DashboardPage() {
   const { session } = useAuth();
   const db = useDatabase();
-  const nowMs = Date.now();
+  const nowMs = useNow();
 
   const student = session?.studentId ? studentById(db, session.studentId) : null;
 

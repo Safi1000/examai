@@ -8,6 +8,7 @@ import { useDatabase } from "@/lib/data/store";
 import { studentById, testById, submissionFor } from "@/lib/data/selectors";
 import { Card, Badge, Pill, Icon, EmptyState } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/Button";
+import { ResultPending } from "@/components/student/ResultPending";
 import { gradeSubmission, gradeLetter, gradeRole } from "@/lib/grading";
 import { formatDuration, formatTimestamp } from "@/lib/time";
 import { cn } from "@/lib/cn";
@@ -29,12 +30,16 @@ export default function ResultsPage() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-8">
         <BackLink />
-        <EmptyState
-          className="mt-4"
-          icon={<Icon.Clock />}
-          title="Results pending"
-          message="Your teacher hasn't released results for this test yet. They'll appear here as soon as they do."
-        />
+        {submission && test.releaseAt ? (
+          <ResultPending releaseAt={test.releaseAt} />
+        ) : (
+          <EmptyState
+            className="mt-4"
+            icon={<Icon.Clock />}
+            title="Results pending"
+            message="Your teacher hasn't released results for this test yet. They'll appear here as soon as they do."
+          />
+        )}
       </div>
     );
   }
