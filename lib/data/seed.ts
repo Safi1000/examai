@@ -14,6 +14,7 @@ import type {
   NoteAssignment,
   Question,
   QuestionBankItem,
+  Rubric,
   Student,
   SubjectItem,
   Submission,
@@ -32,6 +33,7 @@ export interface Database {
   subjects: SubjectItem[];
   notes: Note[];
   noteAssignments: NoteAssignment[];
+  rubrics: Rubric[];
   /** Demo-only. Real admin auth is Supabase Auth; the live store omits this. */
   adminPassword?: string;
 }
@@ -377,6 +379,7 @@ export function createSeed(now: number = Date.now()): Database {
     subjects: [],
     notes: [],
     noteAssignments: [],
+    rubrics: [],
     adminPassword: "admin2026",
   };
 }

@@ -32,6 +32,10 @@ import type {
   QuestionBankItem,
   QuestionCommon,
   QuestionVariant,
+  AiSuggestion,
+  Rubric,
+  RubricCriterion,
+  RubricScore,
   Student,
   SubjectItem,
   Submission,
@@ -70,6 +74,7 @@ const EMPTY: Database = {
   subjects: [],
   notes: [],
   noteAssignments: [],
+  rubrics: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -144,12 +149,35 @@ function mapQuestion(r: Row, correctIndex: number | undefined): Question {
       type: "text",
       maxLength: (r.max_length as number) ?? undefined,
       showCounter: (r.show_counter as boolean) ?? undefined,
+      rubricId: (r.rubric_id as string) ?? undefined,
     };
   }
   return { ...base, type: "photo" };
 }
 
-const mapAnswer = (r: Row): Answer => ({
+const mapRubric = (r: Row): Rubric => ({
+  id: r.id as string,
+  name: r.name as string,
+  criteria: ((r.criteria as RubricCriterion[]) ?? []).map((c) => ({
+    id: c.id,
+    label: c.label,
+    description: c.description ?? undefined,
+    maxPoints: c.maxPoints,
+  })),
+  createdAt: r.created_at as string,
+});
+
+/** Map an AI-suggestion row (admin-only table) into the domain shape. */
+const mapAiSuggestion = (r: Row): AiSuggestion => ({
+  scores: (r.scores as AiSuggestion["scores"]) ?? [],
+  overallRationale: (r.overall_rationale as string) ?? "",
+  model: r.model as string,
+  at: r.created_at as string,
+});
+
+/** `aiByAnswer` maps answer row id -> suggestion (admin sessions only). */
+const mapAnswer = (r: Row, aiByAnswer?: Map<string, AiSuggestion>): Answer => ({
+  id: r.id as string,
   questionId: r.question_id as string,
   type: r.type as Answer["type"],
   selectedIndex: (r.selected_index as number) ?? undefined,
@@ -157,9 +185,11 @@ const mapAnswer = (r: Row): Answer => ({
   photoDataUrl: (r.photo_url as string) ?? undefined,
   marksAwarded: (r.marks_awarded as number) ?? undefined,
   feedback: (r.feedback as string) ?? undefined,
+  rubricScores: (r.rubric_scores as RubricScore[]) ?? undefined,
+  aiSuggestion: aiByAnswer?.get(r.id as string),
 });
 
-const mapSubmission = (r: Row): Submission => ({
+const mapSubmission = (r: Row, aiByAnswer?: Map<string, AiSuggestion>): Submission => ({
   id: r.id as string,
   testId: r.test_id as string,
   studentId: r.student_id as string,
@@ -169,7 +199,7 @@ const mapSubmission = (r: Row): Submission => ({
   autoSubmitted: (r.auto_submitted as boolean) ?? undefined,
   durationSeconds: (r.duration_seconds as number) ?? undefined,
   releasedAt: (r.released_at as string) ?? undefined,
-  answers: ((r.answers as Row[]) ?? []).map(mapAnswer),
+  answers: ((r.answers as Row[]) ?? []).map((a) => mapAnswer(a, aiByAnswer)),
 });
 
 const mapAnnouncement = (r: Row): Announcement => ({
@@ -216,6 +246,7 @@ function questionToRow(testId: string, id: string, q: Omit<Question, "id" | "ord
     options: v.type === "mcq" ? v.options : null,
     max_length: v.type === "text" ? v.maxLength ?? null : null,
     show_counter: v.type === "text" ? v.showCounter ?? null : null,
+    rubric_id: v.type === "text" ? v.rubricId ?? null : null,
     sort_order: order,
   };
 }
@@ -276,7 +307,7 @@ class Store {
   /** Hydrate the cache from Supabase (scoped by RLS for the current session). */
   async load() {
     const sb = supabase();
-    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns] = await Promise.all([
+    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, rub, aiSug] = await Promise.all([
       sb.from("cohorts").select("*").order("created_at"),
       sb.from("students").select("*").order("created_at"),
       sb.from("tests").select("*, questions(*)").order("created_at"),
@@ -292,10 +323,17 @@ class Store {
       sb.from("student_subjects").select("*"),
       sb.from("notes").select("*").order("created_at", { ascending: false }),
       sb.from("note_assignments").select("*"),
+      sb.from("rubrics").select("*").order("created_at"),
+      sb.from("answer_ai_suggestions").select("*"), // admin-only: empty for students
     ]);
 
     const firstError = [coh, stu, tst, sub, ann, bnk].find((r) => r.error)?.error;
     if (firstError) this.report(`load: ${firstError.message}`);
+
+    // AI suggestions live in an admin-only table (empty for students); attach
+    // them to their answers by answer id.
+    const aiByAnswer = new Map<string, AiSuggestion>();
+    for (const r of (aiSug.data as Row[]) ?? []) aiByAnswer.set(r.answer_id as string, mapAiSuggestion(r));
 
     // Correct-option lookup: admin gets it from question_keys; a student gets it
     // only from their own released answers (RLS withholds it otherwise).
@@ -362,13 +400,14 @@ class Store {
         mapStudent(r, studentClassMap.get(r.id as string) ?? [], studentSubjectMap.get(r.id as string) ?? [])
       ),
       tests,
-      submissions: ((sub.data as Row[]) ?? []).map(mapSubmission),
+      submissions: ((sub.data as Row[]) ?? []).map((r) => mapSubmission(r, aiByAnswer)),
       announcements: ((ann.data as Row[]) ?? []).map(mapAnnouncement),
       bank: ((bnk.data as Row[]) ?? []).map(mapBank),
       classes: ((cls.data as Row[]) ?? []).map(mapClass),
       subjects: ((subj.data as Row[]) ?? []).map(mapSubject),
       notes: ((nts.data as Row[]) ?? []).map(mapNote),
       noteAssignments: ((nAssigns.data as Row[]) ?? []).map(mapNoteAssignment),
+      rubrics: ((rub.data as Row[]) ?? []).map(mapRubric),
     };
     this.ready = true;
     this.notify();
@@ -808,20 +847,61 @@ class Store {
     }
     return id;
   }
-  gradeAnswer(submissionId: string, questionId: string, marksAwarded: number, feedback?: string) {
+  /**
+   * Grade one answer. For rubric-graded written answers pass `rubricScores`:
+   * the per-criterion points are the source of truth and their sum overrides
+   * `marksAwarded`, so the committed total always equals the criterion sum.
+   */
+  gradeAnswer(
+    submissionId: string,
+    questionId: string,
+    marksAwarded: number,
+    feedback?: string,
+    rubricScores?: RubricScore[],
+  ) {
+    const marks = rubricScores ? rubricScores.reduce((s, r) => s + r.points, 0) : marksAwarded;
     this.commit((d) => {
       const ans = d.submissions.find((s) => s.id === submissionId)?.answers.find((a) => a.questionId === questionId);
       if (ans) {
-        ans.marksAwarded = marksAwarded;
+        ans.marksAwarded = marks;
         if (feedback !== undefined) ans.feedback = feedback;
+        if (rubricScores !== undefined) ans.rubricScores = rubricScores;
       }
     });
-    const patch: Row = { marks_awarded: marksAwarded };
+    const patch: Row = { marks_awarded: marks };
     if (feedback !== undefined) patch.feedback = feedback;
+    if (rubricScores !== undefined) patch.rubric_scores = rubricScores;
     this.run(
       supabase().from("answers").update(patch).eq("submission_id", submissionId).eq("question_id", questionId),
       "gradeAnswer",
     );
+  }
+
+  /**
+   * Ask the grade-suggest edge function for an AI grading suggestion for one
+   * answer. NOT an optimistic write: the suggestion is written into the cache
+   * only once it resolves, and it never touches `rubricScores`/`marksAwarded`
+   * (an admin must explicitly accept it). Returns the suggestion or null.
+   */
+  async requestAiSuggestion(answerId: string): Promise<AiSuggestion | null> {
+    const { data, error } = await supabase().functions.invoke("grade-suggest", {
+      body: { answerId },
+    });
+    if (error || (data as Row)?.error) {
+      this.report(`requestAiSuggestion: ${error?.message ?? (data as Row)?.error}`);
+      return null;
+    }
+    const suggestion = data as AiSuggestion;
+    this.commit((d) => {
+      for (const s of d.submissions) {
+        const a = s.answers.find((x) => x.id === answerId);
+        if (a) {
+          a.aiSuggestion = suggestion;
+          break;
+        }
+      }
+    });
+    return suggestion;
   }
   releaseSubmission(submissionId: string) {
     const releasedAt = new Date().toISOString();
@@ -889,12 +969,20 @@ class Store {
     this.commit((d) => {
       const i = d.submissions.findIndex((s) => s.id === submissionId);
       if (i >= 0) {
+        // AI suggestions live in a separate admin-only table not fetched here;
+        // carry any already in the cache over to the refreshed answers.
+        const aiById = new Map(
+          d.submissions[i].answers.filter((a) => a.id && a.aiSuggestion).map((a) => [a.id!, a.aiSuggestion!]),
+        );
+        const merged = sub.answers.map((a) =>
+          a.id && aiById.has(a.id) ? { ...a, aiSuggestion: aiById.get(a.id) } : a,
+        );
         // Never downgrade known answers to an empty set: a student can't read
         // their own answers until results are released (RLS hides them), so a
         // refresh of a just-submitted row returns none — keep the optimistic ones.
         d.submissions[i] = {
           ...sub,
-          answers: sub.answers.length ? sub.answers : d.submissions[i].answers,
+          answers: merged.length ? merged : d.submissions[i].answers,
         };
       } else {
         d.submissions.push(sub);
@@ -961,6 +1049,37 @@ class Store {
   deleteBankItem(id: string) {
     this.commit((d) => { d.bank = d.bank.filter((b) => b.id !== id); });
     this.run(supabase().from("question_bank").delete().eq("id", id), "deleteBankItem");
+  }
+
+  // ---- Rubrics ---------------------------------------------------------
+  addRubric(name: string, criteria: RubricCriterion[]): string {
+    const id = genId();
+    const createdAt = new Date().toISOString();
+    this.commit((d) => d.rubrics.push({ id, name, criteria, createdAt }));
+    this.run(supabase().from("rubrics").insert({ id, name, criteria, created_at: createdAt }), "addRubric");
+    return id;
+  }
+  updateRubric(id: string, patch: Partial<Pick<Rubric, "name" | "criteria">>) {
+    this.commit((d) => {
+      const r = d.rubrics.find((x) => x.id === id);
+      if (r) Object.assign(r, patch);
+    });
+    const row: Row = {};
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.criteria !== undefined) row.criteria = patch.criteria;
+    this.run(supabase().from("rubrics").update(row).eq("id", id), "updateRubric");
+  }
+  deleteRubric(id: string) {
+    this.commit((d) => {
+      d.rubrics = d.rubrics.filter((r) => r.id !== id);
+      // Detach from any question that referenced it (FK is ON DELETE SET NULL).
+      d.tests.forEach((t) =>
+        t.questions.forEach((q) => {
+          if (q.type === "text" && q.rubricId === id) q.rubricId = undefined;
+        }),
+      );
+    });
+    this.run(supabase().from("rubrics").delete().eq("id", id), "deleteRubric");
   }
 
   // ---- Notes -----------------------------------------------------------

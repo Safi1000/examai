@@ -12,6 +12,8 @@ export const studentById = (db: Database, id: string) => db.students.find((s) =>
 export const testById = (db: Database, id: string) => db.tests.find((t) => t.id === id) ?? null;
 export const submissionById = (db: Database, id: string) =>
   db.submissions.find((s) => s.id === id) ?? null;
+export const rubricById = (db: Database, id: string | null | undefined) =>
+  id ? db.rubrics.find((r) => r.id === id) ?? null : null;
 
 export const studentsInCohort = (db: Database, cohortId: string) =>
   db.students.filter((s) => s.cohortId === cohortId);
