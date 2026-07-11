@@ -14,7 +14,11 @@ import type {
   NoteAssignment,
   Question,
   QuestionBankItem,
+<<<<<<< HEAD
   QuestionFlag,
+=======
+  Rubric,
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
   Student,
   SubjectItem,
   Submission,
@@ -33,8 +37,12 @@ export interface Database {
   subjects: SubjectItem[];
   notes: Note[];
   noteAssignments: NoteAssignment[];
+<<<<<<< HEAD
   /** Student-raised question flags (RLS: own rows for a student, all for admin). */
   questionFlags: QuestionFlag[];
+=======
+  rubrics: Rubric[];
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
   /** Demo-only. Real admin auth is Supabase Auth; the live store omits this. */
   adminPassword?: string;
 }
@@ -380,7 +388,11 @@ export function createSeed(now: number = Date.now()): Database {
     subjects: [],
     notes: [],
     noteAssignments: [],
+<<<<<<< HEAD
     questionFlags: [],
+=======
+    rubrics: [],
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
     adminPassword: "admin2026",
   };
 }

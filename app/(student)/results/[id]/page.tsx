@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import type { Answer, Question } from "@/types";
+import type { Answer, Question, Rubric } from "@/types";
 import { useAuth } from "@/lib/auth-context";
 import { useDatabase } from "@/lib/data/store";
-import { studentById, testById, submissionFor } from "@/lib/data/selectors";
+import { studentById, testById, submissionFor, rubricById } from "@/lib/data/selectors";
 import { Card, Badge, Pill, Icon, EmptyState } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/Button";
 import { QuestionFlagControl } from "@/components/flags/QuestionFlagControl";
@@ -98,6 +98,7 @@ export default function ResultsPage() {
       <div className="space-y-3">
         {test.questions.map((q, i) => {
           const a = submission.answers.find((x) => x.questionId === q.id);
+<<<<<<< HEAD
           return (
             <BreakdownCard
               key={q.id}
@@ -107,12 +108,17 @@ export default function ResultsPage() {
               flagContext={{ studentId: student.id, testId: test.id, submissionId: submission.id }}
             />
           );
+=======
+          const rubric = q.type === "text" ? rubricById(db, q.rubricId) : null;
+          return <BreakdownCard key={q.id} index={i} question={q} answer={a} rubric={rubric} />;
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
         })}
       </div>
     </div>
   );
 }
 
+<<<<<<< HEAD
 function BreakdownCard({
   index,
   question,
@@ -124,9 +130,14 @@ function BreakdownCard({
   answer?: Answer;
   flagContext: { studentId: string; testId: string; submissionId: string };
 }) {
+=======
+function BreakdownCard({ index, question, answer, rubric }: { index: number; question: Question; answer?: Answer; rubric?: Rubric | null }) {
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
   const awarded = answer?.marksAwarded ?? 0;
   const full = awarded >= question.marks;
   const zero = awarded === 0;
+  const rubricScores = answer?.rubricScores ?? [];
+  const showRubric = !!rubric && rubricScores.length > 0;
 
   return (
     <Card className="p-4">
@@ -192,6 +203,24 @@ function BreakdownCard({
             <p className="text-sm italic text-ink-3">(no photo)</p>
           ))}
       </div>
+
+      {showRubric && (
+        <div className="mt-3 rounded-md border border-border bg-surface-2/40 p-3">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-ink-3">Rubric breakdown</p>
+          <ul className="space-y-1">
+            {rubric!.criteria.map((c) => {
+              const s = rubricScores.find((x) => x.criterionId === c.id);
+              if (!s) return null;
+              return (
+                <li key={c.id} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="text-ink-2">{c.label}</span>
+                  <span className="shrink-0 font-mono font-semibold text-ink">{s.points}/{c.maxPoints}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {answer?.feedback && (
         <div className="mt-3 rounded-md border border-info/30 bg-info-soft/60 px-3 py-2">
