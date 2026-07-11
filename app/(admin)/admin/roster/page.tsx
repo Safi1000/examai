@@ -8,6 +8,7 @@ import { useAdminFilter } from "@/lib/admin-filter";
 import { cohortById } from "@/lib/data/selectors";
 import { useToast } from "@/components/toast";
 import { PageHeader } from "@/components/admin/PageHeader";
+import { CsvImportModal } from "@/components/admin/CsvImportModal";
 import { Card, Button, Input, Select, Label, CohortDot, Modal, EmptyState, Icon } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
@@ -64,6 +65,7 @@ export default function RosterPage() {
   const [form, setForm] = useState({ username: "", email: "", cohortId: "", tempPassword: "", classIds: [] as string[], subjectIds: [] as string[] });
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Student | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const students = useMemo(
     () =>
@@ -127,7 +129,14 @@ export default function RosterPage() {
       <PageHeader
         title="Roster"
         subtitle={`${students.length} students`}
-        actions={<Button onClick={openNew} disabled={db.cohorts.length === 0}><Icon.Plus className="h-4 w-4" /> Add student</Button>}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setImporting(true)} disabled={db.cohorts.length === 0}>
+              <Icon.Download className="h-4 w-4" /> Import CSV
+            </Button>
+            <Button onClick={openNew} disabled={db.cohorts.length === 0}><Icon.Plus className="h-4 w-4" /> Add student</Button>
+          </>
+        }
       />
 
       <div className="mb-4">
@@ -251,6 +260,8 @@ export default function RosterPage() {
       >
         <p className="text-sm text-ink-2">This action cannot be undone.</p>
       </Modal>
+
+      <CsvImportModal open={importing} onClose={() => setImporting(false)} />
     </div>
   );
 }

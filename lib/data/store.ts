@@ -548,6 +548,63 @@ class Store {
         if (input.subjectIds.length) this.setStudentSubjects(student.id, input.subjectIds);
       });
   }
+  /**
+   * Bulk roster import (Feature 3). Provisions many students through the same
+   * admin-only `admin-users` edge function as addStudent — never a direct
+   * insert. Uploads are chunked so a large roster doesn't hit the function's
+   * request/time limits and so the caller can render real progress; created
+   * rows are merged into the cache as each chunk returns. Returns a per-username
+   * result list for the import summary. Async by design — the UI awaits it.
+   */
+  async bulkAddStudents(
+    inputs: { username: string; email?: string; cohortId: string; password: string }[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<{ username: string; status: "created" | "failed"; reason?: string }[]> {
+    const CHUNK = 25;
+    const total = inputs.length;
+    const out: { username: string; status: "created" | "failed"; reason?: string }[] = [];
+    let done = 0;
+    onProgress?.(0, total);
+
+    for (let i = 0; i < inputs.length; i += CHUNK) {
+      const chunk = inputs.slice(i, i + CHUNK);
+      try {
+        const { data, error } = await supabase().functions.invoke("admin-users", {
+          body: {
+            action: "bulk-create",
+            students: chunk.map((s) => ({
+              username: s.username,
+              email: s.email,
+              cohortId: s.cohortId,
+              password: s.password,
+            })),
+          },
+        });
+        if (error || (data as Row)?.error) {
+          // Whole-chunk failure (network / function error): fail each row in it.
+          const reason = error?.message ?? String((data as Row)?.error);
+          for (const s of chunk) out.push({ username: s.username, status: "failed", reason });
+        } else {
+          const results = ((data as Row).results as Row[]) ?? [];
+          for (const r of results) {
+            const status = r.status as "created" | "failed";
+            out.push({ username: r.username as string, status, reason: (r.reason as string) ?? undefined });
+            if (status === "created" && r.student) {
+              const student = mapStudent(r.student as Row);
+              this.commit((d) => {
+                if (!d.students.some((x) => x.id === student.id)) d.students.push(student);
+              });
+            }
+          }
+        }
+      } catch (e) {
+        for (const s of chunk) out.push({ username: s.username, status: "failed", reason: String(e) });
+      }
+      done += chunk.length;
+      onProgress?.(done, total);
+    }
+    return out;
+  }
   updateStudent(id: string, patch: Partial<Omit<Student, "id" | "createdAt">>) {
     this.commit((d) => {
       const s = d.students.find((x) => x.id === id);
