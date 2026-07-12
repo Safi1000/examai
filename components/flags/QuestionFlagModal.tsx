@@ -1,20 +1,24 @@
 "use client";
 
 /**
- * The one place a student reports a problem with a question. Used from the test
- * runner (mid-test, no submission row yet) and from the released result
- * breakdown (submission known) — same component, same 250-char rule, so the two
- * entry points can never drift apart.
+ * The student's flag panel — a conversation, not a fire-and-forget form.
  *
- * Mount it only while open (QuestionFlagControl does): unmounting is what resets
- * the form, so the next question never inherits the last one's draft.
+ * Two modes in one dialog:
+ *   1. No thread yet  → reason + opening message. Sending CREATES the flag and
+ *      immediately switches this same dialog into chat mode. It does NOT close,
+ *      does not navigate, and does not touch the exam or its timer.
+ *   2. Thread exists  → chat: full history + a composer for follow-ups. Teacher
+ *      replies stream in over Realtime while it stays open.
+ *
+ * The dialog only ever closes when the student explicitly closes it.
  */
 import { useState } from "react";
-import type { FlagReason, Question } from "@/types";
+import type { FlagReason, Question, QuestionFlag } from "@/types";
 import { FLAG_MESSAGE_MAX, useStore } from "@/lib/data/store";
 import { useToast } from "@/components/toast";
-import { Button, Modal, Select, Textarea } from "@/components/ui";
-import { FLAG_REASONS } from "@/components/flags/meta";
+import { Badge, Button, Icon, Modal, Select, Textarea } from "@/components/ui";
+import { FLAG_REASONS, reasonLabel } from "@/components/flags/meta";
+import { FlagConversation } from "@/components/flags/FlagConversation";
 
 export function QuestionFlagModal({
   open,
@@ -23,6 +27,7 @@ export function QuestionFlagModal({
   studentId,
   testId,
   submissionId = null,
+  existingFlag = null,
 }: {
   open: boolean;
   onClose: () => void;
@@ -31,20 +36,25 @@ export function QuestionFlagModal({
   testId: string;
   /** Null mid-test: the submission doesn't exist yet. */
   submissionId?: string | null;
+  /** When set, open straight into the conversation for this flag. */
+  existingFlag?: QuestionFlag | null;
 }) {
   const store = useStore();
   const { toast } = useToast();
 
-  const [reason, setReason] = useState<FlagReason>("typo");
+  // Once a flag exists (pre-existing, or just created here), we're in chat mode.
+  const [flagId, setFlagId] = useState<string | null>(existingFlag?.id ?? null);
+  const [reason, setReason] = useState<FlagReason>(existingFlag?.reason ?? "typo");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
 
+  const resolved = existingFlag?.status === "resolved";
   const trimmed = message.trim();
   const tooLong = message.length > FLAG_MESSAGE_MAX;
   const canSubmit = trimmed.length > 0 && !tooLong && !saving;
 
-  async function submit() {
+  async function createFlag() {
     if (!trimmed) {
       setError("Tell us what's wrong with the question.");
       return;
@@ -54,7 +64,7 @@ export function QuestionFlagModal({
       return;
     }
     setSaving(true);
-    const ok = await store.addFlag({
+    const newId = await store.addFlag({
       submissionId,
       questionId: question.id,
       questionPrompt: question.prompt,
@@ -64,27 +74,35 @@ export function QuestionFlagModal({
       message: trimmed,
     });
     setSaving(false);
-    if (!ok) {
-      // The store already surfaced the reason through the error toast; keep the
-      // modal open with the typed message intact so nothing is lost.
+    if (!newId) {
+      // Keep the dialog open with the typed message intact so nothing is lost.
       setError("Couldn't send that. Check your connection and try again.");
       return;
     }
-    toast("Flag submitted successfully", "success");
-    onClose();
+    toast("Your message has been sent to the teacher.", "success");
+    setMessage(""); // clear only the input
+    setFlagId(newId); // stay open — slide into the conversation
   }
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title="Flag this question"
-      description="Tell your teacher what looks wrong. This won't affect your answer or your time."
+      title={flagId ? "Your conversation" : "Flag this question"}
+      description={
+        flagId
+          ? "Your teacher will reply here. You can keep asking follow-ups — this won't affect your answer or your time."
+          : "Tell your teacher what looks wrong. This won't affect your answer or your time."
+      }
       footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={submit} loading={saving} disabled={!canSubmit}>Create flag</Button>
-        </>
+        flagId ? (
+          <Button variant="secondary" onClick={onClose}>Close</Button>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button onClick={createFlag} loading={saving} disabled={!canSubmit}>Send</Button>
+          </>
+        )
       }
     >
       <div className="space-y-4">
@@ -93,30 +111,53 @@ export function QuestionFlagModal({
           <p className="mt-0.5 line-clamp-3 text-sm text-ink">{question.prompt}</p>
         </div>
 
-        <Select
-          label="Reason"
-          value={reason}
-          onChange={(e) => setReason(e.target.value as FlagReason)}
-        >
-          {FLAG_REASONS.map((r) => (
-            <option key={r.value} value={r.value}>{r.label}</option>
-          ))}
-        </Select>
+        {flagId ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="neutral">{reasonLabel(existingFlag?.reason ?? reason)}</Badge>
+              {resolved ? (
+                <Badge tone="success"><Icon.Check className="h-3 w-3" /> Resolved</Badge>
+              ) : (
+                <Badge tone="warning">Open</Badge>
+              )}
+            </div>
 
-        <div>
-          <Textarea
-            label="Message"
-            value={message}
-            maxLength={FLAG_MESSAGE_MAX}
-            onChange={(e) => { setMessage(e.target.value); setError(undefined); }}
-            placeholder="What's the problem? Be specific…"
-            error={error}
-            required
-          />
-          <p className="mt-1 text-right text-xs text-ink-3 tabular">
-            {message.length} / {FLAG_MESSAGE_MAX}
-          </p>
-        </div>
+            <FlagConversation
+              flagId={flagId}
+              studentId={studentId}
+              viewer="student"
+              disabled={resolved}
+              disabledNote="Your teacher marked this resolved. The history stays here."
+            />
+          </>
+        ) : (
+          <>
+            <Select
+              label="Reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value as FlagReason)}
+            >
+              {FLAG_REASONS.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </Select>
+
+            <div>
+              <Textarea
+                label="Message"
+                value={message}
+                maxLength={FLAG_MESSAGE_MAX}
+                onChange={(e) => { setMessage(e.target.value); setError(undefined); }}
+                placeholder="What's the problem? Be specific…"
+                error={error}
+                required
+              />
+              <p className="mt-1 text-right text-xs text-ink-3 tabular">
+                {message.length} / {FLAG_MESSAGE_MAX}
+              </p>
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   );
