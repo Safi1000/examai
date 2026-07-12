@@ -14,6 +14,7 @@ import type {
   NoteAssignment,
   Question,
   QuestionBankItem,
+  QuestionFlag,
   Student,
   SubjectItem,
   Submission,
@@ -32,6 +33,8 @@ export interface Database {
   subjects: SubjectItem[];
   notes: Note[];
   noteAssignments: NoteAssignment[];
+  /** Student-raised question flags (RLS: own rows for a student, all for admin). */
+  questionFlags: QuestionFlag[];
   /** Demo-only. Real admin auth is Supabase Auth; the live store omits this. */
   adminPassword?: string;
 }
@@ -377,6 +380,7 @@ export function createSeed(now: number = Date.now()): Database {
     subjects: [],
     notes: [],
     noteAssignments: [],
+    questionFlags: [],
     adminPassword: "admin2026",
   };
 }

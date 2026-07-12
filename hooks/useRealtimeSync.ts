@@ -1,17 +1,19 @@
 "use client";
 
 /**
- * Keeps the store's submissions cache live via Supabase Realtime, so the admin
- * submissions/roster views and the student dashboard react to submits, status
- * changes and (scheduled or manual) result releases without a manual refresh.
+ * Keeps the store's submissions and question-flags caches live via Supabase
+ * Realtime, so the admin submissions/roster/flags views and the student dashboard
+ * react to submits, status changes, (scheduled or manual) result releases and
+ * admin flag replies without a manual refresh.
  *
  * It patches only the affected row — on each change it re-fetches that single
- * submission (with answers) through the store's cache-only `refreshSubmission`,
- * which never writes back, so there's no feedback loop. One channel per signed-in
- * identity; torn down on unmount to avoid duplicate subscriptions / leaks.
+ * submission (with answers) or flag through the store's cache-only
+ * `refreshSubmission` / `refreshFlag`, which never write back, so there's no
+ * feedback loop. One channel per signed-in identity; torn down on unmount to
+ * avoid duplicate subscriptions / leaks.
  *
- * RLS still scopes every streamed row: admins see all submissions, a student only
- * their own (we also add a server-side filter so the student channel is narrow).
+ * RLS still scopes every streamed row: admins see all rows, a student only their
+ * own (we also add a server-side filter so the student channels are narrow).
  */
 import { useEffect } from "react";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
@@ -31,15 +33,25 @@ export function useRealtimeSync() {
 
     const filter = role === "student" ? `student_id=eq.${studentId}` : undefined;
 
+    const rowId = (payload: RealtimePostgresChangesPayload<{ id?: string }>) =>
+      (payload.new as { id?: string })?.id ?? (payload.old as { id?: string })?.id;
+
     const channel = supabase()
-      .channel(`sync:submissions:${key}`)
+      .channel(`sync:${key}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "submissions", ...(filter ? { filter } : {}) },
         (payload: RealtimePostgresChangesPayload<{ id?: string }>) => {
-          const id =
-            (payload.new as { id?: string })?.id ?? (payload.old as { id?: string })?.id;
+          const id = rowId(payload);
           if (id) void getStore().refreshSubmission(id);
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "question_flags", ...(filter ? { filter } : {}) },
+        (payload: RealtimePostgresChangesPayload<{ id?: string }>) => {
+          const id = rowId(payload);
+          if (id) void getStore().refreshFlag(id);
         },
       )
       .subscribe();

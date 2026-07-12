@@ -31,6 +31,7 @@ import type {
   Question,
   QuestionBankItem,
   QuestionCommon,
+  QuestionFlag,
   QuestionVariant,
   Student,
   SubjectItem,
@@ -46,6 +47,13 @@ import { supabase } from "@/lib/supabase";
  * (TS keeps only common keys), so we rebuild the union explicitly to read
  * type-specific fields (options/correctIndex/maxLength).
  */
+/**
+ * Character ceiling for a flag message and an admin reply. The DB enforces the
+ * same limit (varchar(250) + a non-empty check) — this constant only keeps the
+ * counter, the textarea and the client-side guard honest.
+ */
+export const FLAG_MESSAGE_MAX = 250;
+
 type QuestionInput = Omit<QuestionCommon, "id"> & QuestionVariant;
 type BankInput = Omit<QuestionCommon, "id"> & QuestionVariant & { subject: string };
 
@@ -70,6 +78,7 @@ const EMPTY: Database = {
   subjects: [],
   notes: [],
   noteAssignments: [],
+  questionFlags: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -181,6 +190,20 @@ const mapAnnouncement = (r: Row): Announcement => ({
   dismissedBy: (r.dismissed_by as string[]) ?? [],
 });
 
+const mapQuestionFlag = (r: Row): QuestionFlag => ({
+  id: r.id as string,
+  submissionId: (r.submission_id as string) ?? null,
+  questionId: (r.question_id as string) ?? null,
+  testId: (r.test_id as string) ?? null,
+  questionPrompt: (r.question_prompt as string) ?? null,
+  studentId: r.student_id as string,
+  reason: r.reason as QuestionFlag["reason"],
+  message: r.message as string,
+  adminReply: (r.admin_reply as string) ?? undefined,
+  status: r.status as QuestionFlag["status"],
+  createdAt: r.created_at as string,
+});
+
 function mapBank(r: Row): QuestionBankItem {
   const base = {
     id: r.id as string,
@@ -276,7 +299,7 @@ class Store {
   /** Hydrate the cache from Supabase (scoped by RLS for the current session). */
   async load() {
     const sb = supabase();
-    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns] = await Promise.all([
+    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg] = await Promise.all([
       sb.from("cohorts").select("*").order("created_at"),
       sb.from("students").select("*").order("created_at"),
       sb.from("tests").select("*, questions(*)").order("created_at"),
@@ -292,6 +315,7 @@ class Store {
       sb.from("student_subjects").select("*"),
       sb.from("notes").select("*").order("created_at", { ascending: false }),
       sb.from("note_assignments").select("*"),
+      sb.from("question_flags").select("*").order("created_at", { ascending: false }),
     ]);
 
     const firstError = [coh, stu, tst, sub, ann, bnk].find((r) => r.error)?.error;
@@ -369,6 +393,7 @@ class Store {
       subjects: ((subj.data as Row[]) ?? []).map(mapSubject),
       notes: ((nts.data as Row[]) ?? []).map(mapNote),
       noteAssignments: ((nAssigns.data as Row[]) ?? []).map(mapNoteAssignment),
+      questionFlags: ((flg.data as Row[]) ?? []).map(mapQuestionFlag),
     };
     this.ready = true;
     this.notify();
@@ -998,6 +1023,134 @@ class Store {
     });
     // Students can't UPDATE announcements directly — go through the RPC.
     this.run(supabase().rpc("dismiss_announcement", { p_id: id }), "dismissAnnouncement");
+  }
+
+  // ---- Question flags --------------------------------------------------
+  /**
+   * Student files a flag against a question. Optimistic: the row lands in the
+   * cache immediately (client-generated id) and is rolled back if the insert is
+   * rejected — by RLS, by the 250-char/empty check, or by a dropped network.
+   * Awaited by the modal so it can show a spinner and only close on success.
+   */
+  async addFlag(input: {
+    submissionId?: string | null;
+    questionId: string;
+    questionPrompt?: string | null;
+    testId?: string | null;
+    studentId: string;
+    reason: QuestionFlag["reason"];
+    message: string;
+  }): Promise<boolean> {
+    const message = input.message.trim();
+    // Mirror of the DB constraint — never the only line of defence.
+    if (!message || message.length > FLAG_MESSAGE_MAX) {
+      this.report("addFlag: message must be 1–250 characters.");
+      return false;
+    }
+
+    const id = genId();
+    const flag: QuestionFlag = {
+      id,
+      submissionId: input.submissionId ?? null,
+      questionId: input.questionId,
+      testId: input.testId ?? null,
+      questionPrompt: input.questionPrompt ?? null,
+      studentId: input.studentId,
+      reason: input.reason,
+      message,
+      status: "open",
+      createdAt: new Date().toISOString(),
+    };
+    this.commit((d) => d.questionFlags.unshift(flag));
+
+    const { error } = await supabase().from("question_flags").insert({
+      id,
+      submission_id: flag.submissionId,
+      question_id: flag.questionId,
+      test_id: flag.testId,
+      question_prompt: flag.questionPrompt,
+      student_id: flag.studentId,
+      reason: flag.reason,
+      message: flag.message,
+      status: "open",
+      created_at: flag.createdAt,
+    });
+    if (error) {
+      this.commit((d) => { d.questionFlags = d.questionFlags.filter((f) => f.id !== id); });
+      this.report(`addFlag: ${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Admin replies to a flag. Re-replying overwrites the previous reply. */
+  async replyToFlag(flagId: string, reply: string): Promise<boolean> {
+    const text = reply.trim();
+    if (!text || text.length > FLAG_MESSAGE_MAX) {
+      this.report("replyToFlag: reply must be 1–250 characters.");
+      return false;
+    }
+    const before = this.state.questionFlags.find((f) => f.id === flagId)?.adminReply;
+    this.commit((d) => {
+      const f = d.questionFlags.find((x) => x.id === flagId);
+      if (f) f.adminReply = text;
+    });
+    const { error } = await supabase().from("question_flags").update({ admin_reply: text }).eq("id", flagId);
+    if (error) {
+      this.commit((d) => {
+        const f = d.questionFlags.find((x) => x.id === flagId);
+        if (f) f.adminReply = before;
+      });
+      this.report(`replyToFlag: ${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Admin closes the issue. The student keeps read access; they can't reopen. */
+  async resolveFlag(flagId: string): Promise<boolean> {
+    const before = this.state.questionFlags.find((f) => f.id === flagId)?.status;
+    this.commit((d) => {
+      const f = d.questionFlags.find((x) => x.id === flagId);
+      if (f) f.status = "resolved";
+    });
+    const { error } = await supabase().from("question_flags").update({ status: "resolved" }).eq("id", flagId);
+    if (error) {
+      this.commit((d) => {
+        const f = d.questionFlags.find((x) => x.id === flagId);
+        if (f && before) f.status = before;
+      });
+      this.report(`resolveFlag: ${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Cache-only refresh of one flag from the server (drives realtime sync — it
+   * NEVER writes back, so it can't loop with the change feed). Mirrors
+   * refreshSubmission: upsert when present, drop from the cache when gone.
+   */
+  async refreshFlag(flagId: string) {
+    const { data, error } = await supabase()
+      .from("question_flags")
+      .select("*")
+      .eq("id", flagId)
+      .maybeSingle();
+    if (error) {
+      this.report(`refreshFlag: ${error.message}`);
+      return;
+    }
+    if (!data) {
+      this.commit((d) => { d.questionFlags = d.questionFlags.filter((f) => f.id !== flagId); });
+      return;
+    }
+    const flag = mapQuestionFlag(data as Row);
+    this.commit((d) => {
+      const i = d.questionFlags.findIndex((f) => f.id === flagId);
+      if (i >= 0) d.questionFlags[i] = flag;
+      else d.questionFlags.unshift(flag);
+    });
   }
 
   // ---- Question bank ---------------------------------------------------

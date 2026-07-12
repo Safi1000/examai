@@ -28,6 +28,9 @@ const MAP: Record<string, TypeMeta> = {
   cohort_changed: { icon: <Icon.Users />, tone: "info" },
   integrity_report: { icon: <Icon.Flag />, tone: "warning" },
   grade_updated: { icon: <Icon.Chart />, tone: "info" },
+  question_flagged: { icon: <Icon.Flag />, tone: "warning" },
+  flag_reply: { icon: <Icon.Megaphone />, tone: "info" },
+  flag_resolved: { icon: <Icon.Check />, tone: "success" },
   system: { icon: <Icon.Bell />, tone: "neutral" },
 };
 
@@ -66,6 +69,11 @@ export function ctaLabel(type: string): string | null {
     case "test_submitted":
     case "late_submission":
       return "Review Submission";
+    case "question_flagged":
+      return "Review Flag";
+    case "flag_reply":
+    case "flag_resolved":
+      return "View Flag";
     default:
       return null;
   }

@@ -8,6 +8,7 @@ import { useDatabase } from "@/lib/data/store";
 import { studentById, testById, submissionFor } from "@/lib/data/selectors";
 import { Card, Badge, Pill, Icon, EmptyState } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/Button";
+import { QuestionFlagControl } from "@/components/flags/QuestionFlagControl";
 import { ResultPending } from "@/components/student/ResultPending";
 import { gradeSubmission, gradeLetter, gradeRole } from "@/lib/grading";
 import { formatDuration, formatTimestamp } from "@/lib/time";
@@ -97,14 +98,32 @@ export default function ResultsPage() {
       <div className="space-y-3">
         {test.questions.map((q, i) => {
           const a = submission.answers.find((x) => x.questionId === q.id);
-          return <BreakdownCard key={q.id} index={i} question={q} answer={a} />;
+          return (
+            <BreakdownCard
+              key={q.id}
+              index={i}
+              question={q}
+              answer={a}
+              flagContext={{ studentId: student.id, testId: test.id, submissionId: submission.id }}
+            />
+          );
         })}
       </div>
     </div>
   );
 }
 
-function BreakdownCard({ index, question, answer }: { index: number; question: Question; answer?: Answer }) {
+function BreakdownCard({
+  index,
+  question,
+  answer,
+  flagContext,
+}: {
+  index: number;
+  question: Question;
+  answer?: Answer;
+  flagContext: { studentId: string; testId: string; submissionId: string };
+}) {
   const awarded = answer?.marksAwarded ?? 0;
   const full = awarded >= question.marks;
   const zero = awarded === 0;
@@ -180,6 +199,15 @@ function BreakdownCard({ index, question, answer }: { index: number; question: Q
           <p className="mt-0.5 text-sm text-ink">{answer.feedback}</p>
         </div>
       )}
+
+      <div className="mt-3 border-t border-border pt-3">
+        <QuestionFlagControl
+          question={question}
+          studentId={flagContext.studentId}
+          testId={flagContext.testId}
+          submissionId={flagContext.submissionId}
+        />
+      </div>
     </Card>
   );
 }

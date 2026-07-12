@@ -199,6 +199,38 @@ export interface Announcement {
 }
 
 // ----------------------------------------------------------------------------
+// 7b. Question flags (student ↔ admin messaging about a question)
+// ----------------------------------------------------------------------------
+
+export type FlagReason = "typo" | "ambiguous" | "technical" | "other";
+
+export type FlagStatus = "open" | "resolved";
+
+/**
+ * A student's report of a problem with a question. Raised mid-test (before a
+ * submission row exists — hence the nullable submissionId) or from the released
+ * result breakdown. The admin is the only party who can reply or resolve; RLS
+ * scopes reads to the owning student (see the question_flags migration).
+ */
+export interface QuestionFlag {
+  id: string;
+  /** null when the flag was raised during the test, before submitting. */
+  submissionId: string | null;
+  /** null if the question has since been deleted — questionPrompt still shows. */
+  questionId: string | null;
+  /** null if the test has since been deleted. */
+  testId: string | null;
+  /** Prompt snapshotted at flag time, so a deleted question still renders. */
+  questionPrompt: string | null;
+  studentId: string;
+  reason: FlagReason;
+  message: string; // <= 250 chars (enforced in the editor and the DB)
+  adminReply?: string;
+  status: FlagStatus;
+  createdAt: string;
+}
+
+// ----------------------------------------------------------------------------
 // Supporting shapes (auth, drafts) — not entities, but needed by the UI.
 // ----------------------------------------------------------------------------
 
@@ -257,6 +289,9 @@ export type NotificationType =
   | "cohort_changed"
   | "integrity_report"
   | "grade_updated"
+  | "question_flagged"
+  | "flag_reply"
+  | "flag_resolved"
   | "system";
 
 /**

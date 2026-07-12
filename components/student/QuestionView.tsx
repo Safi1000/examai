@@ -3,18 +3,27 @@
 import { useRef, useState } from "react";
 import type { Answer, Question } from "@/types";
 import { RadioCard, Textarea, Pill, Badge, Button, Icon } from "@/components/ui";
+import { QuestionFlagControl } from "@/components/flags/QuestionFlagControl";
 import { uploadImage } from "@/lib/cloudinary";
 import { useToast } from "@/components/toast";
 
-/** Renders one question and its answer control (MCQ / Text / Photo). */
+/**
+ * Renders one question and its answer control (MCQ / Text / Photo).
+ *
+ * `flagContext` opts the question into flagging (the test runner passes it; the
+ * result breakdown mounts QuestionFlagControl itself). Flagging never touches the
+ * answer or the countdown — the student can carry on with the test.
+ */
 export function QuestionView({
   question,
   answer,
   onChange,
+  flagContext,
 }: {
   question: Question;
   answer: Answer;
   onChange: (next: Answer) => void;
+  flagContext?: { studentId: string; testId: string; submissionId?: string | null };
 }) {
   return (
     <div>
@@ -22,6 +31,17 @@ export function QuestionView({
         <Badge tone="neutral">{question.topic}</Badge>
         <Pill>{question.marks} {question.marks === 1 ? "mark" : "marks"}</Pill>
         <span className="text-xs uppercase tracking-wide text-ink-3">{question.type}</span>
+        {flagContext && (
+          <div className="ml-auto">
+            <QuestionFlagControl
+              question={question}
+              studentId={flagContext.studentId}
+              testId={flagContext.testId}
+              submissionId={flagContext.submissionId ?? null}
+              showThread={false}
+            />
+          </div>
+        )}
       </div>
       <p className="mt-3 text-lg font-semibold leading-snug text-ink">{question.prompt}</p>
 

@@ -170,7 +170,12 @@ export default function TestRunnerPage() {
 
       <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-6">
         <div key={q.id} className="animate-fade-up">
-          <QuestionView question={q} answer={answer} onChange={update} />
+          <QuestionView
+            question={q}
+            answer={answer}
+            onChange={update}
+            flagContext={{ studentId: student.id, testId: test.id }}
+          />
         </div>
       </main>
 
