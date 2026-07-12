@@ -82,11 +82,8 @@ const EMPTY: Database = {
   subjects: [],
   notes: [],
   noteAssignments: [],
-<<<<<<< HEAD
   questionFlags: [],
-=======
   rubrics: [],
->>>>>>> c336ddba87101a81222978823206b0521b2b8338
 };
 
 // ---------------------------------------------------------------------------
@@ -300,6 +297,12 @@ class Store {
   private listeners = new Set<() => void>();
   ready = false;
   private report: (msg: string) => void = (m) => console.error("[store]", m);
+  /**
+   * In-flight create-persists, keyed by the new row's id. Lets a child write
+   * (e.g. a question against a just-created test) await its parent's INSERT
+   * before firing, closing the optimistic parent-then-child FK race.
+   */
+  private pendingCreate = new Map<string, Promise<unknown>>();
 
   setErrorReporter(fn: (msg: string) => void) {
     this.report = fn;
@@ -330,15 +333,35 @@ class Store {
       .catch((e) => this.report(`${label}: ${String(e)}`));
   }
 
+  /**
+   * Like run(), but records the persist so child writes can await this row's
+   * INSERT (keyed by the new id). Surfaces failures like run(); the entry is
+   * removed once the write settles (success OR failure — a failed parent means
+   * the child insert then fails and surfaces its own error, never silently).
+   */
+  private runCreate(key: string, p: PromiseLike<{ error: { message: string } | null }>, label: string) {
+    const promise = Promise.resolve(p)
+      .then(({ error }) => {
+        if (error) this.report(`${label}: ${error.message}`);
+      })
+      .catch((e) => this.report(`${label}: ${String(e)}`))
+      .finally(() => {
+        if (this.pendingCreate.get(key) === promise) this.pendingCreate.delete(key);
+      });
+    this.pendingCreate.set(key, promise);
+  }
+
+  /** Await a parent's in-flight create (no-op if it already settled / was never tracked). */
+  private async awaitCreate(key: string): Promise<void> {
+    const p = this.pendingCreate.get(key);
+    if (p) await p;
+  }
+
   // ---- Lifecycle -------------------------------------------------------
   /** Hydrate the cache from Supabase (scoped by RLS for the current session). */
   async load() {
     const sb = supabase();
-<<<<<<< HEAD
-    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg] = await Promise.all([
-=======
-    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, rub, aiSug] = await Promise.all([
->>>>>>> c336ddba87101a81222978823206b0521b2b8338
+    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg, rub, aiSug] = await Promise.all([
       sb.from("cohorts").select("*").order("created_at"),
       sb.from("students").select("*").order("created_at"),
       sb.from("tests").select("*, questions(*)").order("created_at"),
@@ -354,12 +377,9 @@ class Store {
       sb.from("student_subjects").select("*"),
       sb.from("notes").select("*").order("created_at", { ascending: false }),
       sb.from("note_assignments").select("*"),
-<<<<<<< HEAD
       sb.from("question_flags").select("*").order("created_at", { ascending: false }),
-=======
       sb.from("rubrics").select("*").order("created_at"),
       sb.from("answer_ai_suggestions").select("*"), // admin-only: empty for students
->>>>>>> c336ddba87101a81222978823206b0521b2b8338
     ]);
 
     const firstError = [coh, stu, tst, sub, ann, bnk].find((r) => r.error)?.error;
@@ -442,11 +462,8 @@ class Store {
       subjects: ((subj.data as Row[]) ?? []).map(mapSubject),
       notes: ((nts.data as Row[]) ?? []).map(mapNote),
       noteAssignments: ((nAssigns.data as Row[]) ?? []).map(mapNoteAssignment),
-<<<<<<< HEAD
       questionFlags: ((flg.data as Row[]) ?? []).map(mapQuestionFlag),
-=======
       rubrics: ((rub.data as Row[]) ?? []).map(mapRubric),
->>>>>>> c336ddba87101a81222978823206b0521b2b8338
     };
     this.ready = true;
     this.notify();
@@ -463,7 +480,9 @@ class Store {
     const id = genId();
     const createdAt = new Date().toISOString();
     this.commit((d) => d.cohorts.push({ id, name, color, classIds: [], subjectIds: [], createdAt }));
-    this.run(supabase().from("cohorts").insert({ id, name, color, created_at: createdAt }), "addCohort");
+    // Tracked: setCohortClasses/Subjects fire right after and insert junction
+    // rows referencing this cohort — they await this INSERT first.
+    this.runCreate(id, supabase().from("cohorts").insert({ id, name, color, created_at: createdAt }), "addCohort");
     return id;
   }
   updateCohort(id: string, patch: Partial<Pick<Cohort, "name" | "color">>) {
@@ -497,10 +516,15 @@ class Store {
     });
     const sb = supabase();
     void (async () => {
-      await sb.from("cohort_classes").delete().eq("cohort_id", cohortId);
-      if (classIds.length) {
-        const { error } = await sb.from("cohort_classes").insert(classIds.map((cid) => ({ cohort_id: cohortId, class_id: cid })));
-        if (error) this.report(`setCohortClasses: ${error.message}`);
+      try {
+        await this.awaitCreate(cohortId); // parent cohort may still be persisting
+        await sb.from("cohort_classes").delete().eq("cohort_id", cohortId);
+        if (classIds.length) {
+          const { error } = await sb.from("cohort_classes").insert(classIds.map((cid) => ({ cohort_id: cohortId, class_id: cid })));
+          if (error) this.report(`setCohortClasses: ${error.message}`);
+        }
+      } catch (e) {
+        this.report(`setCohortClasses: ${String(e)}`);
       }
     })();
   }
@@ -511,10 +535,15 @@ class Store {
     });
     const sb = supabase();
     void (async () => {
-      await sb.from("cohort_subjects").delete().eq("cohort_id", cohortId);
-      if (subjectIds.length) {
-        const { error } = await sb.from("cohort_subjects").insert(subjectIds.map((sid) => ({ cohort_id: cohortId, subject_id: sid })));
-        if (error) this.report(`setCohortSubjects: ${error.message}`);
+      try {
+        await this.awaitCreate(cohortId); // parent cohort may still be persisting
+        await sb.from("cohort_subjects").delete().eq("cohort_id", cohortId);
+        if (subjectIds.length) {
+          const { error } = await sb.from("cohort_subjects").insert(subjectIds.map((sid) => ({ cohort_id: cohortId, subject_id: sid })));
+          if (error) this.report(`setCohortSubjects: ${error.message}`);
+        }
+      } catch (e) {
+        this.report(`setCohortSubjects: ${String(e)}`);
       }
     })();
   }
@@ -731,7 +760,8 @@ class Store {
     this.commit((d) =>
       d.tests.push({ ...input, id, questions: input.questions ?? [], createdAt }),
     );
-    this.run(
+    this.runCreate(
+      id,
       supabase().from("tests").insert({
         id,
         title: input.title,
@@ -785,6 +815,9 @@ class Store {
     // the MCQ grades as wrong. Sequence the two writes.
     void (async () => {
       try {
+        // Wait for the parent test's INSERT if it was just created and is still
+        // in flight — otherwise this question's FK to tests(id) can be rejected.
+        await this.awaitCreate(testId);
         const { error: qErr } = await sb.from("questions").insert(questionToRow(testId, id, q, order));
         if (qErr) return this.report(`addQuestion: ${qErr.message}`);
         if (v.type === "mcq") {
@@ -894,6 +927,9 @@ class Store {
     // Persist each question, then its key (FK ordering — see addQuestion).
     void (async () => {
       try {
+        // Same parent-then-child guard as addQuestion: a test created moments
+        // ago may not have committed yet.
+        await this.awaitCreate(testId);
         for (const p of pending) {
           const { error: qErr } = await sb.from("questions").insert(questionToRow(testId, p.id, p.rest, p.order));
           if (qErr) { this.report(`importBank: ${qErr.message}`); continue; }

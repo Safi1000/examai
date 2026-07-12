@@ -98,41 +98,36 @@ export default function ResultsPage() {
       <div className="space-y-3">
         {test.questions.map((q, i) => {
           const a = submission.answers.find((x) => x.questionId === q.id);
-<<<<<<< HEAD
+          const rubric = q.type === "text" ? rubricById(db, q.rubricId) : null;
           return (
             <BreakdownCard
               key={q.id}
               index={i}
               question={q}
               answer={a}
+              rubric={rubric}
               flagContext={{ studentId: student.id, testId: test.id, submissionId: submission.id }}
             />
           );
-=======
-          const rubric = q.type === "text" ? rubricById(db, q.rubricId) : null;
-          return <BreakdownCard key={q.id} index={i} question={q} answer={a} rubric={rubric} />;
->>>>>>> c336ddba87101a81222978823206b0521b2b8338
         })}
       </div>
     </div>
   );
 }
 
-<<<<<<< HEAD
 function BreakdownCard({
   index,
   question,
   answer,
+  rubric,
   flagContext,
 }: {
   index: number;
   question: Question;
   answer?: Answer;
+  rubric?: Rubric | null;
   flagContext: { studentId: string; testId: string; submissionId: string };
 }) {
-=======
-function BreakdownCard({ index, question, answer, rubric }: { index: number; question: Question; answer?: Answer; rubric?: Rubric | null }) {
->>>>>>> c336ddba87101a81222978823206b0521b2b8338
   const awarded = answer?.marksAwarded ?? 0;
   const full = awarded >= question.marks;
   const zero = awarded === 0;
