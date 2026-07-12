@@ -73,6 +73,7 @@ Deno.serve(async (req: Request) => {
             username: String(username).trim(),
             email: email || null,
             cohort_id: cohortId || null,
+            must_change_password: true, // temp password — force a change on first login
           })
           .select()
           .single();

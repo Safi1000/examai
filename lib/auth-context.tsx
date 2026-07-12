@@ -22,6 +22,10 @@ interface AuthContextValue {
   loginAdmin: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   isRole: (role: Role) => boolean;
+  /** True while a student is still on their temporary password (student only). */
+  mustChangePassword: boolean;
+  /** Clear the force-change flag in session state after a successful change. */
+  clearMustChangePassword: () => void;
   /** Current accent theme id; persists per user (server + local cache). */
   themeId: string;
   setTheme: (id: string) => void;
@@ -33,8 +37,19 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 async function resolveSession(user: User): Promise<Session> {
   const isAdmin = (user.app_metadata as Record<string, unknown>)?.role === "admin";
   if (isAdmin) return { role: "admin" };
-  const { data } = await supabase().from("students").select("id").eq("user_id", user.id).maybeSingle();
-  return { role: "student", studentId: (data?.id as string) ?? undefined };
+  // Same query that resolves studentId also reads the force-change flag — no
+  // extra round-trip. Re-read on every session load, so it can't be bypassed by
+  // refreshing or navigating directly to a route.
+  const { data } = await supabase()
+    .from("students")
+    .select("id, must_change_password")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  return {
+    role: "student",
+    studentId: (data?.id as string) ?? undefined,
+    mustChangePassword: (data?.must_change_password as boolean) ?? false,
+  };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -126,6 +141,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [establish],
   );
 
+  /** Flip the force-change flag off locally (store.changePassword persisted it). */
+  const clearMustChangePassword = useCallback(() => {
+    setSession((s) => (s ? { ...s, mustChangePassword: false } : s));
+  }, []);
+
   const logout = useCallback(() => {
     void supabase().auth.signOut(); // onAuthStateChange clears session + cache
     currentUserId.current = null;
@@ -152,10 +172,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loginAdmin,
       logout,
       isRole: (role) => session?.role === role,
+      mustChangePassword: session?.role === "student" && !!session.mustChangePassword,
+      clearMustChangePassword,
       themeId,
       setTheme,
     }),
-    [session, initializing, loginStudent, loginAdmin, logout, themeId, setTheme],
+    [session, initializing, loginStudent, loginAdmin, logout, clearMustChangePassword, themeId, setTheme],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

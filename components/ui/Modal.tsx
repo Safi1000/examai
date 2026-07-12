@@ -16,6 +16,7 @@ export function Modal({
   children,
   footer,
   size = "md",
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -24,6 +25,8 @@ export function Modal({
   children: React.ReactNode;
   footer?: React.ReactNode;
   size?: "sm" | "md" | "lg";
+  /** When false, hides the close button and disables Esc + backdrop close. */
+  dismissible?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -38,7 +41,7 @@ export function Modal({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
+      if (e.key === "Escape" && dismissible) onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
@@ -48,7 +51,7 @@ export function Modal({
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [open]);
+  }, [open, dismissible]);
 
   if (!open || typeof document === "undefined") return null;
 
@@ -61,7 +64,11 @@ export function Modal({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
+      <div
+        className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]"
+        onClick={dismissible ? onClose : undefined}
+        aria-hidden
+      />
       <div
         ref={panelRef}
         tabIndex={-1}
@@ -76,15 +83,17 @@ export function Modal({
             <h2 className="text-lg font-bold text-ink">{title}</h2>
             {description && <p className="mt-0.5 text-sm text-ink-2">{description}</p>}
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close dialog"
-            className="-mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink"
-          >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
-            </svg>
-          </button>
+          {dismissible && (
+            <button
+              onClick={onClose}
+              aria-label="Close dialog"
+              className="-mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 6l12 12M18 6 6 18" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && (

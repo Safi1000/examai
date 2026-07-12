@@ -12,10 +12,11 @@ import { CohortTag } from "@/components/ui";
 import { Icon } from "@/components/ui";
 import { cohortById } from "@/lib/data/selectors";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { ForceChangePasswordDialog } from "@/components/student/ForceChangePasswordDialog";
 import { cn } from "@/lib/cn";
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
-  const { session, logout, initializing } = useAuth();
+  const { session, logout, initializing, mustChangePassword } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const db = useDatabase();
@@ -96,6 +97,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
         </header>
       )}
       {children}
+      {mustChangePassword && <ForceChangePasswordDialog />}
     </div>
   );
 }
