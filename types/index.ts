@@ -302,6 +302,8 @@ export type Role = "student" | "admin";
 export interface Session {
   role: Role;
   studentId?: string; // present when role === "student"
+  /** True until a student created with a temporary password sets their own. */
+  mustChangePassword?: boolean;
 }
 
 /** Autosaved test-runner draft (survives refresh; per student+test). */

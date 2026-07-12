@@ -104,7 +104,7 @@ export function QuestionModal({
         type: "text",
         maxLength,
         showCounter,
-        ...(withSubject ? {} : { rubricId: rubricId || undefined }),
+        rubricId: rubricId || undefined,
       } as QuestionDraft;
     } else {
       draft = { ...common, type: "photo" } as QuestionDraft;
@@ -204,28 +204,26 @@ export function QuestionModal({
                 <Checkbox checked={showCounter} onChange={setShowCounter} label="Show character counter" />
               </div>
             </div>
-            {!withSubject && (
-              <div>
-                <div className="flex items-end gap-2">
-                  <Select
-                    label="Grading rubric (optional)"
-                    value={rubricId}
-                    onChange={(e) => setRubricId(e.target.value)}
-                  >
-                    <option value="">No rubric — grade with a single mark</option>
-                    {db.rubrics.map((r) => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                  </Select>
-                  <Button type="button" variant="secondary" size="sm" className="mb-0.5 shrink-0" onClick={() => setRubricModalOpen(true)}>
-                    New rubric
-                  </Button>
-                </div>
-                <p className="mt-1.5 text-xs text-ink-3">
-                  A rubric enables per-criterion grading and AI grade suggestions for this written answer.
-                </p>
+            <div>
+              <div className="flex items-end gap-2">
+                <Select
+                  label="Grading rubric (optional)"
+                  value={rubricId}
+                  onChange={(e) => setRubricId(e.target.value)}
+                >
+                  <option value="">No rubric — grade with a single mark</option>
+                  {db.rubrics.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </Select>
+                <Button type="button" variant="secondary" size="sm" className="mb-0.5 shrink-0" onClick={() => setRubricModalOpen(true)}>
+                  New rubric
+                </Button>
               </div>
-            )}
+              <p className="mt-1.5 text-xs text-ink-3">
+                A rubric enables per-criterion grading and AI grade suggestions for this written answer.
+              </p>
+            </div>
           </>
         )}
 

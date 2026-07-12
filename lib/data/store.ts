@@ -254,6 +254,7 @@ function mapBank(r: Row): QuestionBankItem {
       type: "text",
       maxLength: (r.max_length as number) ?? undefined,
       showCounter: (r.show_counter as boolean) ?? undefined,
+      rubricId: (r.rubric_id as string) ?? undefined,
     };
   }
   return { ...base, type: "photo" };
@@ -783,11 +784,17 @@ class Store {
     // question row commits — otherwise a concurrent insert can lose the key and
     // the MCQ grades as wrong. Sequence the two writes.
     void (async () => {
-      const { error: qErr } = await sb.from("questions").insert(questionToRow(testId, id, q, order));
-      if (qErr) return this.report(`addQuestion: ${qErr.message}`);
-      if (v.type === "mcq") {
-        const { error: kErr } = await sb.from("question_keys").insert({ question_id: id, correct_index: v.correctIndex });
-        if (kErr) this.report(`addQuestion/key: ${kErr.message}`);
+      try {
+        const { error: qErr } = await sb.from("questions").insert(questionToRow(testId, id, q, order));
+        if (qErr) return this.report(`addQuestion: ${qErr.message}`);
+        if (v.type === "mcq") {
+          const { error: kErr } = await sb.from("question_keys").insert({ question_id: id, correct_index: v.correctIndex });
+          if (kErr) this.report(`addQuestion/key: ${kErr.message}`);
+        }
+      } catch (e) {
+        // A thrown error (e.g. network drop) would otherwise be an unhandled
+        // rejection — surface it so the optimistic add doesn't look successful.
+        this.report(`addQuestion: ${String(e)}`);
       }
     })();
   }
@@ -806,16 +813,20 @@ class Store {
     const { id: _id, test_id: _t, sort_order: _o, ...fields } = questionToRow(testId, questionId, q, order);
     void _id; void _t; void _o;
     void (async () => {
-      const { error: qErr } = await sb.from("questions").update(fields).eq("id", questionId);
-      if (qErr) return this.report(`updateQuestion: ${qErr.message}`);
-      if (v.type === "mcq") {
-        const { error: kErr } = await sb
-          .from("question_keys")
-          .upsert({ question_id: questionId, correct_index: v.correctIndex });
-        if (kErr) this.report(`updateQuestion/key: ${kErr.message}`);
-      } else {
-        const { error: kErr } = await sb.from("question_keys").delete().eq("question_id", questionId);
-        if (kErr) this.report(`updateQuestion/key-clear: ${kErr.message}`);
+      try {
+        const { error: qErr } = await sb.from("questions").update(fields).eq("id", questionId);
+        if (qErr) return this.report(`updateQuestion: ${qErr.message}`);
+        if (v.type === "mcq") {
+          const { error: kErr } = await sb
+            .from("question_keys")
+            .upsert({ question_id: questionId, correct_index: v.correctIndex });
+          if (kErr) this.report(`updateQuestion/key: ${kErr.message}`);
+        } else {
+          const { error: kErr } = await sb.from("question_keys").delete().eq("question_id", questionId);
+          if (kErr) this.report(`updateQuestion/key-clear: ${kErr.message}`);
+        }
+      } catch (e) {
+        this.report(`updateQuestion: ${String(e)}`);
       }
     })();
   }
@@ -832,12 +843,21 @@ class Store {
     this.commit((d) => {
       const t = d.tests.find((x) => x.id === testId);
       if (!t) return;
-      t.questions = orderedIds
-        .map((qid, i) => {
-          const q = t.questions.find((x) => x.id === qid);
-          return q ? { ...q, order: i } : null;
-        })
-        .filter((q): q is Question => q !== null);
+      // Reorder is order-ONLY and must never drop a question. Emit the ids we
+      // were given in their new order, then append any question still in the
+      // cache that wasn't in `orderedIds` — a stale/partial drag snapshot (e.g.
+      // taken just before a concurrent add or bank import) must not be able to
+      // overwrite the list with an incomplete version and wipe questions.
+      const remaining = new Map(t.questions.map((q) => [q.id, q]));
+      const ordered: Question[] = [];
+      for (const qid of orderedIds) {
+        const q = remaining.get(qid);
+        if (q) { ordered.push(q); remaining.delete(qid); }
+      }
+      for (const q of t.questions) {
+        if (remaining.has(q.id)) ordered.push(q); // leftovers keep their relative order
+      }
+      t.questions = ordered.map((q, i) => ({ ...q, order: i }));
     });
     this.persistReorder(testId);
   }
@@ -873,13 +893,17 @@ class Store {
     });
     // Persist each question, then its key (FK ordering — see addQuestion).
     void (async () => {
-      for (const p of pending) {
-        const { error: qErr } = await sb.from("questions").insert(questionToRow(testId, p.id, p.rest, p.order));
-        if (qErr) { this.report(`importBank: ${qErr.message}`); continue; }
-        if (p.correctIndex !== undefined) {
-          const { error: kErr } = await sb.from("question_keys").insert({ question_id: p.id, correct_index: p.correctIndex });
-          if (kErr) this.report(`importBank/key: ${kErr.message}`);
+      try {
+        for (const p of pending) {
+          const { error: qErr } = await sb.from("questions").insert(questionToRow(testId, p.id, p.rest, p.order));
+          if (qErr) { this.report(`importBank: ${qErr.message}`); continue; }
+          if (p.correctIndex !== undefined) {
+            const { error: kErr } = await sb.from("question_keys").insert({ question_id: p.id, correct_index: p.correctIndex });
+            if (kErr) this.report(`importBank/key: ${kErr.message}`);
+          }
         }
+      } catch (e) {
+        this.report(`importBank: ${String(e)}`);
       }
     })();
   }
@@ -1274,6 +1298,30 @@ class Store {
     this.run(supabase().from("question_bank").delete().eq("id", id), "deleteBankItem");
   }
 
+  // ---- Account ---------------------------------------------------------
+  /**
+   * Set the current (already-authenticated) student's password and clear the
+   * force-change flag. The student is signed in with their temp password, so
+   * this is a normal authenticated password update — not a reset flow. Returns
+   * true on success; failures surface through the error reporter. The caller
+   * flips the session flag via auth's clearMustChangePassword() on success.
+   */
+  async changePassword(newPassword: string): Promise<boolean> {
+    const sb = supabase();
+    const { error: pErr } = await sb.auth.updateUser({ password: newPassword });
+    if (pErr) {
+      this.report(`changePassword: ${pErr.message}`);
+      return false;
+    }
+    // Clears must_change_password on the student's own row (RLS: RPC only).
+    const { error: fErr } = await sb.rpc("clear_must_change_password");
+    if (fErr) {
+      this.report(`changePassword/flag: ${fErr.message}`);
+      return false;
+    }
+    return true;
+  }
+
   // ---- Rubrics ---------------------------------------------------------
   addRubric(name: string, criteria: RubricCriterion[]): string {
     const id = genId();
@@ -1350,6 +1398,7 @@ function bankToRow(id: string, item: Omit<QuestionBankItem, "id">): Row {
     options: v.type === "mcq" ? v.options : null,
     max_length: v.type === "text" ? v.maxLength ?? null : null,
     show_counter: v.type === "text" ? v.showCounter ?? null : null,
+    rubric_id: v.type === "text" ? v.rubricId ?? null : null,
     correct_index: v.type === "mcq" ? v.correctIndex : null,
   };
 }
