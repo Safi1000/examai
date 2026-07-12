@@ -26,6 +26,9 @@ import type {
   ClassItem,
   Cohort,
   CohortColor,
+  ExamLock,
+  ExamViolation,
+  FlagMessage,
   Note,
   NoteAssignment,
   Question,
@@ -42,6 +45,7 @@ import type {
   Submission,
   Test,
   TestStatus,
+  ViolationType,
 } from "@/types";
 import type { Database } from "@/lib/data/seed";
 import { supabase } from "@/lib/supabase";
@@ -84,6 +88,9 @@ const EMPTY: Database = {
   noteAssignments: [],
   questionFlags: [],
   rubrics: [],
+  flagMessages: [],
+  examLocks: [],
+  examViolations: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -220,6 +227,36 @@ const mapAnnouncement = (r: Row): Announcement => ({
   dismissedBy: (r.dismissed_by as string[]) ?? [],
 });
 
+const mapFlagMessage = (r: Row): FlagMessage => ({
+  id: r.id as string,
+  flagId: r.flag_id as string,
+  studentId: r.student_id as string,
+  sender: r.sender as FlagMessage["sender"],
+  body: r.body as string,
+  createdAt: r.created_at as string,
+});
+
+const mapExamViolation = (r: Row): ExamViolation => ({
+  id: r.id as string,
+  studentId: r.student_id as string,
+  testId: r.test_id as string,
+  violationType: r.violation_type as ExamViolation["violationType"],
+  metadata: (r.metadata as Record<string, unknown>) ?? {},
+  createdAt: r.created_at as string,
+});
+
+const mapExamLock = (r: Row): ExamLock => ({
+  id: r.id as string,
+  studentId: r.student_id as string,
+  testId: r.test_id as string,
+  status: r.status as ExamLock["status"],
+  reason: (r.reason as ExamLock["reason"]) ?? null,
+  violationCount: (r.violation_count as number) ?? 0,
+  lockedAt: (r.locked_at as string) ?? null,
+  unlockedAt: (r.unlocked_at as string) ?? null,
+  createdAt: r.created_at as string,
+});
+
 const mapQuestionFlag = (r: Row): QuestionFlag => ({
   id: r.id as string,
   submissionId: (r.submission_id as string) ?? null,
@@ -338,13 +375,29 @@ class Store {
    * INSERT (keyed by the new id). Surfaces failures like run(); the entry is
    * removed once the write settles (success OR failure — a failed parent means
    * the child insert then fails and surfaces its own error, never silently).
+   *
+   * On failure it also invokes the caller-supplied `rollback` so the optimistic
+   * cache entry committed before this call is removed — otherwise the UI keeps
+   * showing a row that was never persisted. Each caller passes the removal that
+   * matches its entity (e.g. filtering the new id out of its collection).
    */
-  private runCreate(key: string, p: PromiseLike<{ error: { message: string } | null }>, label: string) {
+  private runCreate(
+    key: string,
+    p: PromiseLike<{ error: { message: string } | null }>,
+    label: string,
+    rollback?: () => void,
+  ) {
     const promise = Promise.resolve(p)
       .then(({ error }) => {
-        if (error) this.report(`${label}: ${error.message}`);
+        if (error) {
+          this.report(`${label}: ${error.message}`);
+          rollback?.();
+        }
       })
-      .catch((e) => this.report(`${label}: ${String(e)}`))
+      .catch((e) => {
+        this.report(`${label}: ${String(e)}`);
+        rollback?.();
+      })
       .finally(() => {
         if (this.pendingCreate.get(key) === promise) this.pendingCreate.delete(key);
       });
@@ -361,7 +414,7 @@ class Store {
   /** Hydrate the cache from Supabase (scoped by RLS for the current session). */
   async load() {
     const sb = supabase();
-    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg, rub, aiSug] = await Promise.all([
+    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg, rub, aiSug, lks, fmsg, viol] = await Promise.all([
       sb.from("cohorts").select("*").order("created_at"),
       sb.from("students").select("*").order("created_at"),
       sb.from("tests").select("*, questions(*)").order("created_at"),
@@ -380,6 +433,9 @@ class Store {
       sb.from("question_flags").select("*").order("created_at", { ascending: false }),
       sb.from("rubrics").select("*").order("created_at"),
       sb.from("answer_ai_suggestions").select("*"), // admin-only: empty for students
+      sb.from("exam_locks").select("*").order("locked_at", { ascending: false }),
+      sb.from("flag_messages").select("*").order("created_at"),
+      sb.from("exam_violations").select("*").order("created_at"),
     ]);
 
     const firstError = [coh, stu, tst, sub, ann, bnk].find((r) => r.error)?.error;
@@ -464,6 +520,9 @@ class Store {
       noteAssignments: ((nAssigns.data as Row[]) ?? []).map(mapNoteAssignment),
       questionFlags: ((flg.data as Row[]) ?? []).map(mapQuestionFlag),
       rubrics: ((rub.data as Row[]) ?? []).map(mapRubric),
+      examLocks: ((lks.data as Row[]) ?? []).map(mapExamLock),
+      flagMessages: ((fmsg.data as Row[]) ?? []).map(mapFlagMessage),
+      examViolations: ((viol.data as Row[]) ?? []).map(mapExamViolation),
     };
     this.ready = true;
     this.notify();
@@ -482,7 +541,12 @@ class Store {
     this.commit((d) => d.cohorts.push({ id, name, color, classIds: [], subjectIds: [], createdAt }));
     // Tracked: setCohortClasses/Subjects fire right after and insert junction
     // rows referencing this cohort — they await this INSERT first.
-    this.runCreate(id, supabase().from("cohorts").insert({ id, name, color, created_at: createdAt }), "addCohort");
+    this.runCreate(
+      id,
+      supabase().from("cohorts").insert({ id, name, color, created_at: createdAt }),
+      "addCohort",
+      () => this.commit((d) => { d.cohorts = d.cohorts.filter((c) => c.id !== id); }),
+    );
     return id;
   }
   updateCohort(id: string, patch: Partial<Pick<Cohort, "name" | "color">>) {
@@ -754,7 +818,16 @@ class Store {
   }
 
   // ---- Tests + questions ----------------------------------------------
-  addTest(input: Omit<Test, "id" | "createdAt" | "questions"> & { questions?: Question[] }): string {
+  /**
+   * Create a test. AWAITED (not fire-and-forget) on purpose: callers immediately
+   * insert questions that carry test_id as a foreign key, so the test row has to
+   * be committed first or the questions hit questions_test_id_fkey. A failed
+   * insert rolls the optimistic row back, so a "phantom" test can never linger in
+   * the cache pretending to exist in the database.
+   */
+  async addTest(
+    input: Omit<Test, "id" | "createdAt" | "questions"> & { questions?: Question[] },
+  ): Promise<string | null> {
     const id = genId();
     const createdAt = new Date().toISOString();
     this.commit((d) =>
@@ -778,6 +851,7 @@ class Store {
         created_at: createdAt,
       }),
       "addTest",
+      () => this.commit((d) => { d.tests = d.tests.filter((t) => t.id !== id); }),
     );
     return id;
   }
@@ -791,12 +865,127 @@ class Store {
   setTestStatus(id: string, status: TestStatus) {
     this.updateTest(id, { status });
   }
-  deleteTest(id: string) {
+  /**
+   * Permanently delete a test. This is AWAITED and VERIFIED — the previous
+   * fire-and-forget version was the bug: a Supabase delete that matches zero rows
+   * (e.g. RLS refuses it) returns NO error, so we removed it locally, reported
+   * success, and the row came straight back on the next load.
+   *
+   * `.select("id")` makes the delete return what it actually removed, so a 0-row
+   * delete is caught and the optimistic removal is rolled back instead of lying.
+   * The DB cascades questions/submissions/violations/locks; we mirror that in the
+   * cache so nothing stale is left pointing at a test that no longer exists.
+   */
+  async deleteTest(id: string): Promise<boolean> {
+    const snapshot = this.state; // for rollback
+
     this.commit((d) => {
       d.tests = d.tests.filter((t) => t.id !== id);
       d.submissions = d.submissions.filter((s) => s.testId !== id);
+      // Mirror the DB's cascades / set-nulls so no cached row points at a ghost.
+      d.examViolations = d.examViolations.filter((v) => v.testId !== id);
+      d.examLocks = d.examLocks.filter((l) => l.testId !== id);
+      d.questionFlags = d.questionFlags.map((f) => (f.testId === id ? { ...f, testId: null } : f));
     });
-    this.run(supabase().from("tests").delete().eq("id", id), "deleteTest");
+
+    const { data, error } = await supabase().from("tests").delete().eq("id", id).select("id");
+    if (error) {
+      this.state = snapshot;
+      this.notify();
+      this.report(`deleteTest: ${error.message}`);
+      return false;
+    }
+    if (!data || data.length === 0) {
+      // Nothing was removed — almost always RLS refusing the delete. Never pretend.
+      this.state = snapshot;
+      this.notify();
+      this.report("deleteTest: the database refused to delete this test (no rows removed).");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Cache-only refresh of one test (drives realtime; never writes back). Drops it
+   * from the cache when it's gone from the server — this is what stops a student
+   * from holding a deleted test and then failing a foreign key on flag/violation.
+   */
+  async refreshTest(testId: string) {
+    const { data, error } = await supabase()
+      .from("tests").select("*, questions(*)").eq("id", testId).maybeSingle();
+    if (error) {
+      this.report(`refreshTest: ${error.message}`);
+      return;
+    }
+    if (!data) {
+      this.commit((d) => {
+        d.tests = d.tests.filter((t) => t.id !== testId);
+        d.submissions = d.submissions.filter((s) => s.testId !== testId);
+        d.examViolations = d.examViolations.filter((v) => v.testId !== testId);
+        d.examLocks = d.examLocks.filter((l) => l.testId !== testId);
+      });
+      return;
+    }
+    const r = data as Row;
+    // Keep whatever answer keys this session is already entitled to see.
+    const known = new Map<string, number>();
+    for (const t of this.state.tests) {
+      if (t.id !== testId) continue;
+      for (const q of t.questions) {
+        if (q.type === "mcq" && q.correctIndex >= 0) known.set(q.id, q.correctIndex);
+      }
+    }
+    const test: Test = {
+      id: r.id as string,
+      title: r.title as string,
+      subject: r.subject as string,
+      durationMinutes: r.duration_minutes as number,
+      cohortId: (r.cohort_id as string) ?? null,
+      classId: (r.class_id as string) ?? null,
+      subjectId: (r.subject_id as string) ?? null,
+      opensAt: r.opens_at as string,
+      closesAt: r.closes_at as string,
+      releaseAt: (r.release_at as string) ?? null,
+      testCode: r.test_code as string,
+      status: r.status as TestStatus,
+      createdAt: r.created_at as string,
+      questions: ((r.questions as Row[]) ?? [])
+        .map((q) => mapQuestion(q, known.get(q.id as string)))
+        .sort((a, b) => a.order - b.order),
+    };
+    this.commit((d) => {
+      const i = d.tests.findIndex((t) => t.id === testId);
+      if (i >= 0) d.tests[i] = test;
+      else d.tests.push(test);
+    });
+  }
+
+  /**
+   * Does this test still exist server-side? Used to validate the foreign key
+   * BEFORE inserting a flag or a violation, so we never fire an insert we know
+   * will fail — and so a stale cached test is evicted the moment we notice.
+   */
+  private async assertTestExists(testId: string): Promise<boolean> {
+    const { data, error } = await supabase()
+      .from("tests").select("id").eq("id", testId).maybeSingle();
+    if (error) {
+      this.report(`Couldn't verify the test: ${error.message}`);
+      return false;
+    }
+    if (!data) {
+      // It's gone. Evict it so the UI stops offering a test that no longer exists.
+      await this.refreshTest(testId);
+      return false;
+    }
+    return true;
+  }
+
+  /** Does this question still exist server-side? (question_id is nullable.) */
+  private async questionExists(questionId: string): Promise<boolean> {
+    const { data, error } = await supabase()
+      .from("questions").select("id").eq("id", questionId).maybeSingle();
+    if (error) return false;
+    return !!data;
   }
   addQuestion(testId: string, q: Omit<Question, "id" | "order">) {
     const id = genId();
@@ -1201,19 +1390,30 @@ class Store {
     studentId: string;
     reason: QuestionFlag["reason"];
     message: string;
-  }): Promise<boolean> {
+  }): Promise<string | null> {
     const message = input.message.trim();
     // Mirror of the DB constraint — never the only line of defence.
     if (!message || message.length > FLAG_MESSAGE_MAX) {
       this.report("addFlag: message must be 1–250 characters.");
-      return false;
+      return null;
     }
+
+    // Validate the foreign keys BEFORE inserting. A stale cached test (deleted by
+    // the admin since this session loaded) is the reason flags were dying on
+    // question_flags_test_id_fkey — never fire an insert we know will fail.
+    if (input.testId && !(await this.assertTestExists(input.testId))) {
+      this.report("This test is no longer available, so it can't be flagged.");
+      return null;
+    }
+    // The question may legitimately have been deleted: the column is nullable and
+    // the prompt is snapshotted, so fall back to null rather than break the FK.
+    const questionId = (await this.questionExists(input.questionId)) ? input.questionId : null;
 
     const id = genId();
     const flag: QuestionFlag = {
       id,
       submissionId: input.submissionId ?? null,
-      questionId: input.questionId,
+      questionId,
       testId: input.testId ?? null,
       questionPrompt: input.questionPrompt ?? null,
       studentId: input.studentId,
@@ -1239,33 +1439,148 @@ class Store {
     if (error) {
       this.commit((d) => { d.questionFlags = d.questionFlags.filter((f) => f.id !== id); });
       this.report(`addFlag: ${error.message}`);
+      return null;
+    }
+    // The opening turn is seeded by a DB trigger — pull it so the thread renders
+    // immediately (Realtime would also deliver it; this just removes the wait).
+    await this.refreshFlagMessagesFor(id);
+    return id;
+  }
+
+  /**
+   * Admin appends a reply turn to the flag's conversation. Replies are now
+   * messages in a thread rather than a single overwritten column, so the whole
+   * back-and-forth is preserved and both sides see it live.
+   */
+  async replyToFlag(flagId: string, reply: string): Promise<boolean> {
+    const flag = this.state.questionFlags.find((f) => f.id === flagId);
+    if (!flag) {
+      this.report("replyToFlag: unknown flag.");
+      return false;
+    }
+    return this.appendFlagMessage(flagId, flag.studentId, "admin", reply);
+  }
+
+  /** Student appends a follow-up to their own thread (RLS forbids forging 'admin'). */
+  async sendFlagMessage(flagId: string, studentId: string, body: string): Promise<boolean> {
+    return this.appendFlagMessage(flagId, studentId, "student", body);
+  }
+
+  /** Optimistic append; rolled back if the insert is rejected (RLS / length / network). */
+  private async appendFlagMessage(
+    flagId: string,
+    studentId: string,
+    sender: FlagMessage["sender"],
+    body: string,
+  ): Promise<boolean> {
+    const text = body.trim();
+    if (!text || text.length > FLAG_MESSAGE_MAX) {
+      this.report(`Message must be 1–${FLAG_MESSAGE_MAX} characters.`);
+      return false;
+    }
+    const id = genId();
+    const msg: FlagMessage = {
+      id,
+      flagId,
+      studentId,
+      sender,
+      body: text,
+      createdAt: new Date().toISOString(),
+    };
+    this.commit((d) => d.flagMessages.push(msg));
+
+    const { error } = await supabase().from("flag_messages").insert({
+      id,
+      flag_id: flagId,
+      student_id: studentId,
+      sender,
+      body: text,
+      created_at: msg.createdAt,
+    });
+    if (error) {
+      this.commit((d) => { d.flagMessages = d.flagMessages.filter((m) => m.id !== id); });
+      this.report(`sendFlagMessage: ${error.message}`);
       return false;
     }
     return true;
   }
 
-  /** Admin replies to a flag. Re-replying overwrites the previous reply. */
-  async replyToFlag(flagId: string, reply: string): Promise<boolean> {
-    const text = reply.trim();
-    if (!text || text.length > FLAG_MESSAGE_MAX) {
-      this.report("replyToFlag: reply must be 1–250 characters.");
-      return false;
+  /** Cache-only refresh of one message (drives realtime; never writes back). */
+  async refreshFlagMessage(messageId: string) {
+    const { data, error } = await supabase()
+      .from("flag_messages").select("*").eq("id", messageId).maybeSingle();
+    if (error) { this.report(`refreshFlagMessage: ${error.message}`); return; }
+    if (!data) {
+      this.commit((d) => { d.flagMessages = d.flagMessages.filter((m) => m.id !== messageId); });
+      return;
     }
-    const before = this.state.questionFlags.find((f) => f.id === flagId)?.adminReply;
+    this.upsertFlagMessage(mapFlagMessage(data as Row));
+  }
+
+  /** Pull a flag's whole thread — the opening turn is seeded server-side on insert. */
+  async refreshFlagMessagesFor(flagId: string) {
+    const { data, error } = await supabase()
+      .from("flag_messages").select("*").eq("flag_id", flagId).order("created_at");
+    if (error) { this.report(`refreshFlagMessagesFor: ${error.message}`); return; }
+    for (const r of (data as Row[]) ?? []) this.upsertFlagMessage(mapFlagMessage(r));
+  }
+
+  private upsertFlagMessage(msg: FlagMessage) {
     this.commit((d) => {
-      const f = d.questionFlags.find((x) => x.id === flagId);
-      if (f) f.adminReply = text;
+      const i = d.flagMessages.findIndex((m) => m.id === msg.id);
+      if (i >= 0) d.flagMessages[i] = msg;
+      else d.flagMessages.push(msg);
     });
-    const { error } = await supabase().from("question_flags").update({ admin_reply: text }).eq("id", flagId);
+  }
+
+  /**
+   * Permanently clear violation history (admin only — RLS enforces it). Verified
+   * like deleteTest: `.select("id")` proves what was actually removed, so a delete
+   * the database refuses can never look like a success. Realtime propagates the
+   * removal to every other open client.
+   *
+   * Note this clears the AUDIT LOG only; it never touches exam_locks, so clearing
+   * history does not silently unlock a locked student.
+   */
+  async clearViolations(where: { id?: string; studentId?: string; testId?: string }): Promise<number> {
+    const snapshot = this.state;
+    const match = (v: ExamViolation) =>
+      (where.id === undefined || v.id === where.id) &&
+      (where.studentId === undefined || v.studentId === where.studentId) &&
+      (where.testId === undefined || v.testId === where.testId);
+
+    this.commit((d) => { d.examViolations = d.examViolations.filter((v) => !match(v)); });
+
+    let q = supabase().from("exam_violations").delete();
+    if (where.id) q = q.eq("id", where.id);
+    if (where.studentId) q = q.eq("student_id", where.studentId);
+    if (where.testId) q = q.eq("test_id", where.testId);
+
+    const { data, error } = await q.select("id");
     if (error) {
-      this.commit((d) => {
-        const f = d.questionFlags.find((x) => x.id === flagId);
-        if (f) f.adminReply = before;
-      });
-      this.report(`replyToFlag: ${error.message}`);
-      return false;
+      this.state = snapshot;
+      this.notify();
+      this.report(`clearViolations: ${error.message}`);
+      return 0;
     }
-    return true;
+    return data?.length ?? 0;
+  }
+
+  /** Cache-only refresh of one violation (drives the live security report). */
+  async refreshViolation(violationId: string) {
+    const { data, error } = await supabase()
+      .from("exam_violations").select("*").eq("id", violationId).maybeSingle();
+    if (error) { this.report(`refreshViolation: ${error.message}`); return; }
+    if (!data) {
+      this.commit((d) => { d.examViolations = d.examViolations.filter((v) => v.id !== violationId); });
+      return;
+    }
+    const v = mapExamViolation(data as Row);
+    this.commit((d) => {
+      const i = d.examViolations.findIndex((x) => x.id === v.id);
+      if (i >= 0) d.examViolations[i] = v;
+      else d.examViolations.push(v);
+    });
   }
 
   /** Admin closes the issue. The student keeps read access; they can't reopen. */
@@ -1311,6 +1626,104 @@ class Store {
       const i = d.questionFlags.findIndex((f) => f.id === flagId);
       if (i >= 0) d.questionFlags[i] = flag;
       else d.questionFlags.unshift(flag);
+    });
+  }
+
+  // ---- Exam security ---------------------------------------------------
+  /**
+   * Record an integrity violation. The LOCK itself is decided server-side (a
+   * trigger on exam_violations counts them and writes exam_locks), so the client
+   * can neither fake nor dodge it. We await the insert, then refresh this
+   * student's lock so the runner locks immediately even if the realtime event is
+   * slow — Realtime still delivers it to any other open tab.
+   */
+  async recordViolation(input: {
+    studentId: string;
+    testId: string;
+    type: ViolationType;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    // exam_violations.test_id is NOT NULL, so a stale cached test would blow up on
+    // exam_violations_test_id_fkey. Validate first; assertTestExists also evicts the
+    // dead test, which bounces the runner out of an exam that no longer exists.
+    if (!(await this.assertTestExists(input.testId))) {
+      this.report("This test is no longer available.");
+      return;
+    }
+    const { error } = await supabase().from("exam_violations").insert({
+      student_id: input.studentId,
+      test_id: input.testId,
+      violation_type: input.type,
+      metadata: input.metadata ?? {},
+    });
+    if (error) {
+      this.report(`recordViolation: ${error.message}`);
+      return;
+    }
+    await this.refreshExamLockFor(input.studentId, input.testId);
+  }
+
+  /** Admin-only (RLS enforces it): let the student back into the exam. */
+  async unlockExam(lockId: string): Promise<boolean> {
+    const before = this.state.examLocks.find((l) => l.id === lockId)?.status;
+    const unlockedAt = new Date().toISOString();
+    this.commit((d) => {
+      const l = d.examLocks.find((x) => x.id === lockId);
+      if (l) { l.status = "active"; l.unlockedAt = unlockedAt; }
+    });
+    const { error } = await supabase()
+      .from("exam_locks")
+      .update({ status: "active", unlocked_at: unlockedAt })
+      .eq("id", lockId);
+    if (error) {
+      this.commit((d) => {
+        const l = d.examLocks.find((x) => x.id === lockId);
+        if (l && before) { l.status = before; l.unlockedAt = null; }
+      });
+      this.report(`unlockExam: ${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Cache-only refresh of one lock by id (drives realtime sync; never writes back). */
+  async refreshExamLock(lockId: string) {
+    const { data, error } = await supabase()
+      .from("exam_locks")
+      .select("*")
+      .eq("id", lockId)
+      .maybeSingle();
+    if (error) {
+      this.report(`refreshExamLock: ${error.message}`);
+      return;
+    }
+    if (!data) {
+      this.commit((d) => { d.examLocks = d.examLocks.filter((l) => l.id !== lockId); });
+      return;
+    }
+    this.upsertExamLock(mapExamLock(data as Row));
+  }
+
+  /** Cache-only refresh of the lock for one student+test (used right after a violation). */
+  async refreshExamLockFor(studentId: string, testId: string) {
+    const { data, error } = await supabase()
+      .from("exam_locks")
+      .select("*")
+      .eq("student_id", studentId)
+      .eq("test_id", testId)
+      .maybeSingle();
+    if (error) {
+      this.report(`refreshExamLockFor: ${error.message}`);
+      return;
+    }
+    if (data) this.upsertExamLock(mapExamLock(data as Row));
+  }
+
+  private upsertExamLock(lock: ExamLock) {
+    this.commit((d) => {
+      const i = d.examLocks.findIndex((l) => l.id === lock.id);
+      if (i >= 0) d.examLocks[i] = lock;
+      else d.examLocks.unshift(lock);
     });
   }
 

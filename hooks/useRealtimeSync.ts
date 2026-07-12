@@ -38,6 +38,18 @@ export function useRealtimeSync() {
 
     const channel = supabase()
       .channel(`sync:${key}`)
+      // Tests carry no student_id, so the student filter must NOT be applied here —
+      // RLS already scopes which tests a student can see. Without this channel a
+      // client kept a test that had been deleted server-side, which is what made
+      // flags and violations fail on their test_id foreign key.
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tests" },
+        (payload: RealtimePostgresChangesPayload<{ id?: string }>) => {
+          const id = rowId(payload);
+          if (id) void getStore().refreshTest(id);
+        },
+      )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "submissions", ...(filter ? { filter } : {}) },
@@ -52,6 +64,33 @@ export function useRealtimeSync() {
         (payload: RealtimePostgresChangesPayload<{ id?: string }>) => {
           const id = rowId(payload);
           if (id) void getStore().refreshFlag(id);
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "exam_locks", ...(filter ? { filter } : {}) },
+        (payload: RealtimePostgresChangesPayload<{ id?: string }>) => {
+          const id = rowId(payload);
+          if (id) void getStore().refreshExamLock(id);
+        },
+      )
+      // Two-way flag chat: a teacher reply lands in the student's open panel and a
+      // student follow-up lands in the admin queue — no polling, no refresh.
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "flag_messages", ...(filter ? { filter } : {}) },
+        (payload: RealtimePostgresChangesPayload<{ id?: string }>) => {
+          const id = rowId(payload);
+          if (id) void getStore().refreshFlagMessage(id);
+        },
+      )
+      // Live security history: new breaches appear in the teacher's report at once.
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "exam_violations", ...(filter ? { filter } : {}) },
+        (payload: RealtimePostgresChangesPayload<{ id?: string }>) => {
+          const id = rowId(payload);
+          if (id) void getStore().refreshViolation(id);
         },
       )
       .subscribe();
