@@ -31,7 +31,12 @@ import type {
   Question,
   QuestionBankItem,
   QuestionCommon,
+  QuestionFlag,
   QuestionVariant,
+  AiSuggestion,
+  Rubric,
+  RubricCriterion,
+  RubricScore,
   Student,
   SubjectItem,
   Submission,
@@ -46,6 +51,13 @@ import { supabase } from "@/lib/supabase";
  * (TS keeps only common keys), so we rebuild the union explicitly to read
  * type-specific fields (options/correctIndex/maxLength).
  */
+/**
+ * Character ceiling for a flag message and an admin reply. The DB enforces the
+ * same limit (varchar(250) + a non-empty check) — this constant only keeps the
+ * counter, the textarea and the client-side guard honest.
+ */
+export const FLAG_MESSAGE_MAX = 250;
+
 type QuestionInput = Omit<QuestionCommon, "id"> & QuestionVariant;
 type BankInput = Omit<QuestionCommon, "id"> & QuestionVariant & { subject: string };
 
@@ -70,6 +82,11 @@ const EMPTY: Database = {
   subjects: [],
   notes: [],
   noteAssignments: [],
+<<<<<<< HEAD
+  questionFlags: [],
+=======
+  rubrics: [],
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
 };
 
 // ---------------------------------------------------------------------------
@@ -144,12 +161,35 @@ function mapQuestion(r: Row, correctIndex: number | undefined): Question {
       type: "text",
       maxLength: (r.max_length as number) ?? undefined,
       showCounter: (r.show_counter as boolean) ?? undefined,
+      rubricId: (r.rubric_id as string) ?? undefined,
     };
   }
   return { ...base, type: "photo" };
 }
 
-const mapAnswer = (r: Row): Answer => ({
+const mapRubric = (r: Row): Rubric => ({
+  id: r.id as string,
+  name: r.name as string,
+  criteria: ((r.criteria as RubricCriterion[]) ?? []).map((c) => ({
+    id: c.id,
+    label: c.label,
+    description: c.description ?? undefined,
+    maxPoints: c.maxPoints,
+  })),
+  createdAt: r.created_at as string,
+});
+
+/** Map an AI-suggestion row (admin-only table) into the domain shape. */
+const mapAiSuggestion = (r: Row): AiSuggestion => ({
+  scores: (r.scores as AiSuggestion["scores"]) ?? [],
+  overallRationale: (r.overall_rationale as string) ?? "",
+  model: r.model as string,
+  at: r.created_at as string,
+});
+
+/** `aiByAnswer` maps answer row id -> suggestion (admin sessions only). */
+const mapAnswer = (r: Row, aiByAnswer?: Map<string, AiSuggestion>): Answer => ({
+  id: r.id as string,
   questionId: r.question_id as string,
   type: r.type as Answer["type"],
   selectedIndex: (r.selected_index as number) ?? undefined,
@@ -157,9 +197,11 @@ const mapAnswer = (r: Row): Answer => ({
   photoDataUrl: (r.photo_url as string) ?? undefined,
   marksAwarded: (r.marks_awarded as number) ?? undefined,
   feedback: (r.feedback as string) ?? undefined,
+  rubricScores: (r.rubric_scores as RubricScore[]) ?? undefined,
+  aiSuggestion: aiByAnswer?.get(r.id as string),
 });
 
-const mapSubmission = (r: Row): Submission => ({
+const mapSubmission = (r: Row, aiByAnswer?: Map<string, AiSuggestion>): Submission => ({
   id: r.id as string,
   testId: r.test_id as string,
   studentId: r.student_id as string,
@@ -169,7 +211,7 @@ const mapSubmission = (r: Row): Submission => ({
   autoSubmitted: (r.auto_submitted as boolean) ?? undefined,
   durationSeconds: (r.duration_seconds as number) ?? undefined,
   releasedAt: (r.released_at as string) ?? undefined,
-  answers: ((r.answers as Row[]) ?? []).map(mapAnswer),
+  answers: ((r.answers as Row[]) ?? []).map((a) => mapAnswer(a, aiByAnswer)),
 });
 
 const mapAnnouncement = (r: Row): Announcement => ({
@@ -179,6 +221,20 @@ const mapAnnouncement = (r: Row): Announcement => ({
   cohortId: (r.cohort_id as string) ?? null,
   createdAt: r.created_at as string,
   dismissedBy: (r.dismissed_by as string[]) ?? [],
+});
+
+const mapQuestionFlag = (r: Row): QuestionFlag => ({
+  id: r.id as string,
+  submissionId: (r.submission_id as string) ?? null,
+  questionId: (r.question_id as string) ?? null,
+  testId: (r.test_id as string) ?? null,
+  questionPrompt: (r.question_prompt as string) ?? null,
+  studentId: r.student_id as string,
+  reason: r.reason as QuestionFlag["reason"],
+  message: r.message as string,
+  adminReply: (r.admin_reply as string) ?? undefined,
+  status: r.status as QuestionFlag["status"],
+  createdAt: r.created_at as string,
 });
 
 function mapBank(r: Row): QuestionBankItem {
@@ -216,6 +272,7 @@ function questionToRow(testId: string, id: string, q: Omit<Question, "id" | "ord
     options: v.type === "mcq" ? v.options : null,
     max_length: v.type === "text" ? v.maxLength ?? null : null,
     show_counter: v.type === "text" ? v.showCounter ?? null : null,
+    rubric_id: v.type === "text" ? v.rubricId ?? null : null,
     sort_order: order,
   };
 }
@@ -276,7 +333,11 @@ class Store {
   /** Hydrate the cache from Supabase (scoped by RLS for the current session). */
   async load() {
     const sb = supabase();
-    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns] = await Promise.all([
+<<<<<<< HEAD
+    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg] = await Promise.all([
+=======
+    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, rub, aiSug] = await Promise.all([
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
       sb.from("cohorts").select("*").order("created_at"),
       sb.from("students").select("*").order("created_at"),
       sb.from("tests").select("*, questions(*)").order("created_at"),
@@ -292,10 +353,21 @@ class Store {
       sb.from("student_subjects").select("*"),
       sb.from("notes").select("*").order("created_at", { ascending: false }),
       sb.from("note_assignments").select("*"),
+<<<<<<< HEAD
+      sb.from("question_flags").select("*").order("created_at", { ascending: false }),
+=======
+      sb.from("rubrics").select("*").order("created_at"),
+      sb.from("answer_ai_suggestions").select("*"), // admin-only: empty for students
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
     ]);
 
     const firstError = [coh, stu, tst, sub, ann, bnk].find((r) => r.error)?.error;
     if (firstError) this.report(`load: ${firstError.message}`);
+
+    // AI suggestions live in an admin-only table (empty for students); attach
+    // them to their answers by answer id.
+    const aiByAnswer = new Map<string, AiSuggestion>();
+    for (const r of (aiSug.data as Row[]) ?? []) aiByAnswer.set(r.answer_id as string, mapAiSuggestion(r));
 
     // Correct-option lookup: admin gets it from question_keys; a student gets it
     // only from their own released answers (RLS withholds it otherwise).
@@ -362,13 +434,18 @@ class Store {
         mapStudent(r, studentClassMap.get(r.id as string) ?? [], studentSubjectMap.get(r.id as string) ?? [])
       ),
       tests,
-      submissions: ((sub.data as Row[]) ?? []).map(mapSubmission),
+      submissions: ((sub.data as Row[]) ?? []).map((r) => mapSubmission(r, aiByAnswer)),
       announcements: ((ann.data as Row[]) ?? []).map(mapAnnouncement),
       bank: ((bnk.data as Row[]) ?? []).map(mapBank),
       classes: ((cls.data as Row[]) ?? []).map(mapClass),
       subjects: ((subj.data as Row[]) ?? []).map(mapSubject),
       notes: ((nts.data as Row[]) ?? []).map(mapNote),
       noteAssignments: ((nAssigns.data as Row[]) ?? []).map(mapNoteAssignment),
+<<<<<<< HEAD
+      questionFlags: ((flg.data as Row[]) ?? []).map(mapQuestionFlag),
+=======
+      rubrics: ((rub.data as Row[]) ?? []).map(mapRubric),
+>>>>>>> c336ddba87101a81222978823206b0521b2b8338
     };
     this.ready = true;
     this.notify();
@@ -547,6 +624,63 @@ class Store {
         if (input.classIds.length) this.setStudentClasses(student.id, input.classIds);
         if (input.subjectIds.length) this.setStudentSubjects(student.id, input.subjectIds);
       });
+  }
+  /**
+   * Bulk roster import (Feature 3). Provisions many students through the same
+   * admin-only `admin-users` edge function as addStudent — never a direct
+   * insert. Uploads are chunked so a large roster doesn't hit the function's
+   * request/time limits and so the caller can render real progress; created
+   * rows are merged into the cache as each chunk returns. Returns a per-username
+   * result list for the import summary. Async by design — the UI awaits it.
+   */
+  async bulkAddStudents(
+    inputs: { username: string; email?: string; cohortId: string; password: string }[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<{ username: string; status: "created" | "failed"; reason?: string }[]> {
+    const CHUNK = 25;
+    const total = inputs.length;
+    const out: { username: string; status: "created" | "failed"; reason?: string }[] = [];
+    let done = 0;
+    onProgress?.(0, total);
+
+    for (let i = 0; i < inputs.length; i += CHUNK) {
+      const chunk = inputs.slice(i, i + CHUNK);
+      try {
+        const { data, error } = await supabase().functions.invoke("admin-users", {
+          body: {
+            action: "bulk-create",
+            students: chunk.map((s) => ({
+              username: s.username,
+              email: s.email,
+              cohortId: s.cohortId,
+              password: s.password,
+            })),
+          },
+        });
+        if (error || (data as Row)?.error) {
+          // Whole-chunk failure (network / function error): fail each row in it.
+          const reason = error?.message ?? String((data as Row)?.error);
+          for (const s of chunk) out.push({ username: s.username, status: "failed", reason });
+        } else {
+          const results = ((data as Row).results as Row[]) ?? [];
+          for (const r of results) {
+            const status = r.status as "created" | "failed";
+            out.push({ username: r.username as string, status, reason: (r.reason as string) ?? undefined });
+            if (status === "created" && r.student) {
+              const student = mapStudent(r.student as Row);
+              this.commit((d) => {
+                if (!d.students.some((x) => x.id === student.id)) d.students.push(student);
+              });
+            }
+          }
+        }
+      } catch (e) {
+        for (const s of chunk) out.push({ username: s.username, status: "failed", reason: String(e) });
+      }
+      done += chunk.length;
+      onProgress?.(done, total);
+    }
+    return out;
   }
   updateStudent(id: string, patch: Partial<Omit<Student, "id" | "createdAt">>) {
     this.commit((d) => {
@@ -808,20 +942,61 @@ class Store {
     }
     return id;
   }
-  gradeAnswer(submissionId: string, questionId: string, marksAwarded: number, feedback?: string) {
+  /**
+   * Grade one answer. For rubric-graded written answers pass `rubricScores`:
+   * the per-criterion points are the source of truth and their sum overrides
+   * `marksAwarded`, so the committed total always equals the criterion sum.
+   */
+  gradeAnswer(
+    submissionId: string,
+    questionId: string,
+    marksAwarded: number,
+    feedback?: string,
+    rubricScores?: RubricScore[],
+  ) {
+    const marks = rubricScores ? rubricScores.reduce((s, r) => s + r.points, 0) : marksAwarded;
     this.commit((d) => {
       const ans = d.submissions.find((s) => s.id === submissionId)?.answers.find((a) => a.questionId === questionId);
       if (ans) {
-        ans.marksAwarded = marksAwarded;
+        ans.marksAwarded = marks;
         if (feedback !== undefined) ans.feedback = feedback;
+        if (rubricScores !== undefined) ans.rubricScores = rubricScores;
       }
     });
-    const patch: Row = { marks_awarded: marksAwarded };
+    const patch: Row = { marks_awarded: marks };
     if (feedback !== undefined) patch.feedback = feedback;
+    if (rubricScores !== undefined) patch.rubric_scores = rubricScores;
     this.run(
       supabase().from("answers").update(patch).eq("submission_id", submissionId).eq("question_id", questionId),
       "gradeAnswer",
     );
+  }
+
+  /**
+   * Ask the grade-suggest edge function for an AI grading suggestion for one
+   * answer. NOT an optimistic write: the suggestion is written into the cache
+   * only once it resolves, and it never touches `rubricScores`/`marksAwarded`
+   * (an admin must explicitly accept it). Returns the suggestion or null.
+   */
+  async requestAiSuggestion(answerId: string): Promise<AiSuggestion | null> {
+    const { data, error } = await supabase().functions.invoke("grade-suggest", {
+      body: { answerId },
+    });
+    if (error || (data as Row)?.error) {
+      this.report(`requestAiSuggestion: ${error?.message ?? (data as Row)?.error}`);
+      return null;
+    }
+    const suggestion = data as AiSuggestion;
+    this.commit((d) => {
+      for (const s of d.submissions) {
+        const a = s.answers.find((x) => x.id === answerId);
+        if (a) {
+          a.aiSuggestion = suggestion;
+          break;
+        }
+      }
+    });
+    return suggestion;
   }
   releaseSubmission(submissionId: string) {
     const releasedAt = new Date().toISOString();
@@ -889,12 +1064,20 @@ class Store {
     this.commit((d) => {
       const i = d.submissions.findIndex((s) => s.id === submissionId);
       if (i >= 0) {
+        // AI suggestions live in a separate admin-only table not fetched here;
+        // carry any already in the cache over to the refreshed answers.
+        const aiById = new Map(
+          d.submissions[i].answers.filter((a) => a.id && a.aiSuggestion).map((a) => [a.id!, a.aiSuggestion!]),
+        );
+        const merged = sub.answers.map((a) =>
+          a.id && aiById.has(a.id) ? { ...a, aiSuggestion: aiById.get(a.id) } : a,
+        );
         // Never downgrade known answers to an empty set: a student can't read
         // their own answers until results are released (RLS hides them), so a
         // refresh of a just-submitted row returns none — keep the optimistic ones.
         d.submissions[i] = {
           ...sub,
-          answers: sub.answers.length ? sub.answers : d.submissions[i].answers,
+          answers: merged.length ? merged : d.submissions[i].answers,
         };
       } else {
         d.submissions.push(sub);
@@ -943,6 +1126,134 @@ class Store {
     this.run(supabase().rpc("dismiss_announcement", { p_id: id }), "dismissAnnouncement");
   }
 
+  // ---- Question flags --------------------------------------------------
+  /**
+   * Student files a flag against a question. Optimistic: the row lands in the
+   * cache immediately (client-generated id) and is rolled back if the insert is
+   * rejected — by RLS, by the 250-char/empty check, or by a dropped network.
+   * Awaited by the modal so it can show a spinner and only close on success.
+   */
+  async addFlag(input: {
+    submissionId?: string | null;
+    questionId: string;
+    questionPrompt?: string | null;
+    testId?: string | null;
+    studentId: string;
+    reason: QuestionFlag["reason"];
+    message: string;
+  }): Promise<boolean> {
+    const message = input.message.trim();
+    // Mirror of the DB constraint — never the only line of defence.
+    if (!message || message.length > FLAG_MESSAGE_MAX) {
+      this.report("addFlag: message must be 1–250 characters.");
+      return false;
+    }
+
+    const id = genId();
+    const flag: QuestionFlag = {
+      id,
+      submissionId: input.submissionId ?? null,
+      questionId: input.questionId,
+      testId: input.testId ?? null,
+      questionPrompt: input.questionPrompt ?? null,
+      studentId: input.studentId,
+      reason: input.reason,
+      message,
+      status: "open",
+      createdAt: new Date().toISOString(),
+    };
+    this.commit((d) => d.questionFlags.unshift(flag));
+
+    const { error } = await supabase().from("question_flags").insert({
+      id,
+      submission_id: flag.submissionId,
+      question_id: flag.questionId,
+      test_id: flag.testId,
+      question_prompt: flag.questionPrompt,
+      student_id: flag.studentId,
+      reason: flag.reason,
+      message: flag.message,
+      status: "open",
+      created_at: flag.createdAt,
+    });
+    if (error) {
+      this.commit((d) => { d.questionFlags = d.questionFlags.filter((f) => f.id !== id); });
+      this.report(`addFlag: ${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Admin replies to a flag. Re-replying overwrites the previous reply. */
+  async replyToFlag(flagId: string, reply: string): Promise<boolean> {
+    const text = reply.trim();
+    if (!text || text.length > FLAG_MESSAGE_MAX) {
+      this.report("replyToFlag: reply must be 1–250 characters.");
+      return false;
+    }
+    const before = this.state.questionFlags.find((f) => f.id === flagId)?.adminReply;
+    this.commit((d) => {
+      const f = d.questionFlags.find((x) => x.id === flagId);
+      if (f) f.adminReply = text;
+    });
+    const { error } = await supabase().from("question_flags").update({ admin_reply: text }).eq("id", flagId);
+    if (error) {
+      this.commit((d) => {
+        const f = d.questionFlags.find((x) => x.id === flagId);
+        if (f) f.adminReply = before;
+      });
+      this.report(`replyToFlag: ${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /** Admin closes the issue. The student keeps read access; they can't reopen. */
+  async resolveFlag(flagId: string): Promise<boolean> {
+    const before = this.state.questionFlags.find((f) => f.id === flagId)?.status;
+    this.commit((d) => {
+      const f = d.questionFlags.find((x) => x.id === flagId);
+      if (f) f.status = "resolved";
+    });
+    const { error } = await supabase().from("question_flags").update({ status: "resolved" }).eq("id", flagId);
+    if (error) {
+      this.commit((d) => {
+        const f = d.questionFlags.find((x) => x.id === flagId);
+        if (f && before) f.status = before;
+      });
+      this.report(`resolveFlag: ${error.message}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Cache-only refresh of one flag from the server (drives realtime sync — it
+   * NEVER writes back, so it can't loop with the change feed). Mirrors
+   * refreshSubmission: upsert when present, drop from the cache when gone.
+   */
+  async refreshFlag(flagId: string) {
+    const { data, error } = await supabase()
+      .from("question_flags")
+      .select("*")
+      .eq("id", flagId)
+      .maybeSingle();
+    if (error) {
+      this.report(`refreshFlag: ${error.message}`);
+      return;
+    }
+    if (!data) {
+      this.commit((d) => { d.questionFlags = d.questionFlags.filter((f) => f.id !== flagId); });
+      return;
+    }
+    const flag = mapQuestionFlag(data as Row);
+    this.commit((d) => {
+      const i = d.questionFlags.findIndex((f) => f.id === flagId);
+      if (i >= 0) d.questionFlags[i] = flag;
+      else d.questionFlags.unshift(flag);
+    });
+  }
+
   // ---- Question bank ---------------------------------------------------
   addBankItem(item: Omit<QuestionBankItem, "id">) {
     const id = genId();
@@ -961,6 +1272,37 @@ class Store {
   deleteBankItem(id: string) {
     this.commit((d) => { d.bank = d.bank.filter((b) => b.id !== id); });
     this.run(supabase().from("question_bank").delete().eq("id", id), "deleteBankItem");
+  }
+
+  // ---- Rubrics ---------------------------------------------------------
+  addRubric(name: string, criteria: RubricCriterion[]): string {
+    const id = genId();
+    const createdAt = new Date().toISOString();
+    this.commit((d) => d.rubrics.push({ id, name, criteria, createdAt }));
+    this.run(supabase().from("rubrics").insert({ id, name, criteria, created_at: createdAt }), "addRubric");
+    return id;
+  }
+  updateRubric(id: string, patch: Partial<Pick<Rubric, "name" | "criteria">>) {
+    this.commit((d) => {
+      const r = d.rubrics.find((x) => x.id === id);
+      if (r) Object.assign(r, patch);
+    });
+    const row: Row = {};
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.criteria !== undefined) row.criteria = patch.criteria;
+    this.run(supabase().from("rubrics").update(row).eq("id", id), "updateRubric");
+  }
+  deleteRubric(id: string) {
+    this.commit((d) => {
+      d.rubrics = d.rubrics.filter((r) => r.id !== id);
+      // Detach from any question that referenced it (FK is ON DELETE SET NULL).
+      d.tests.forEach((t) =>
+        t.questions.forEach((q) => {
+          if (q.type === "text" && q.rubricId === id) q.rubricId = undefined;
+        }),
+      );
+    });
+    this.run(supabase().from("rubrics").delete().eq("id", id), "deleteRubric");
   }
 
   // ---- Notes -----------------------------------------------------------

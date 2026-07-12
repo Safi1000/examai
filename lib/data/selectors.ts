@@ -2,7 +2,7 @@
  * Pure selectors over the database snapshot. These approximate the row-level
  * security a real backend would enforce; TODO(rls) move scoping server-side.
  */
-import type { Announcement, Student, Submission, Test, TestStats } from "@/types";
+import type { Announcement, QuestionFlag, Student, Submission, Test, TestStats } from "@/types";
 import type { Database } from "@/lib/data/seed";
 import { awardedMarks, percent, totalMarks } from "@/lib/scoring";
 
@@ -12,6 +12,8 @@ export const studentById = (db: Database, id: string) => db.students.find((s) =>
 export const testById = (db: Database, id: string) => db.tests.find((t) => t.id === id) ?? null;
 export const submissionById = (db: Database, id: string) =>
   db.submissions.find((s) => s.id === id) ?? null;
+export const rubricById = (db: Database, id: string | null | undefined) =>
+  id ? db.rubrics.find((r) => r.id === id) ?? null : null;
 
 export const studentsInCohort = (db: Database, cohortId: string) =>
   db.students.filter((s) => s.cohortId === cohortId);
@@ -38,6 +40,14 @@ export function submissionFor(db: Database, studentId: string, testId: string): 
   return (
     db.submissions.find((s) => s.studentId === studentId && s.testId === testId) ?? null
   );
+}
+
+/**
+ * Flags the signed-in student raised on one question. RLS already scopes the
+ * cache to their own rows; the studentId filter keeps the selector honest.
+ */
+export function flagsForQuestion(db: Database, studentId: string, questionId: string): QuestionFlag[] {
+  return db.questionFlags.filter((f) => f.studentId === studentId && f.questionId === questionId);
 }
 
 export function submissionsForTest(db: Database, testId: string): Submission[] {

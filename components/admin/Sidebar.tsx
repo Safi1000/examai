@@ -16,6 +16,7 @@ const NAV = [
   { href: "/admin/roster", label: "Roster", icon: Icon.Users },
   { href: "/admin/notes", label: "Notes", icon: Icon.Download },
   { href: "/admin/announcements", label: "Announcements", icon: Icon.Megaphone },
+  { href: "/admin/flags", label: "Question flags", icon: Icon.Flag },
   { href: "/admin/analytics", label: "Analytics", icon: Icon.Chart },
   { href: "/admin/export", label: "Export", icon: Icon.Download },
   { href: "/admin/settings", label: "Settings", icon: Icon.Palette },

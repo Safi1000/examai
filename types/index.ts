@@ -98,7 +98,13 @@ export type QuestionVariant =
       /** TODO(security): answer key belongs server-side, never shipped to students. */
       correctIndex: number;
     }
-  | { type: "text"; maxLength?: number; showCounter?: boolean }
+  | {
+      type: "text";
+      maxLength?: number;
+      showCounter?: boolean;
+      /** Optional reusable rubric this written question is graded against. */
+      rubricId?: string;
+    }
   | { type: "photo" };
 
 export interface QuestionCommon {
@@ -155,6 +161,8 @@ export interface Test {
 // ----------------------------------------------------------------------------
 
 export interface Answer {
+  /** Answer row id — present once loaded from the server (used by AI grading). */
+  id?: string;
   questionId: string;
   type: QuestionType;
   /** MCQ selection. */
@@ -166,6 +174,61 @@ export interface Answer {
   /** Grading — undefined until scored. */
   marksAwarded?: number;
   feedback?: string;
+  /**
+   * Human-committed per-criterion breakdown for rubric-graded written answers.
+   * Always sums into `marksAwarded`. Visible to the student once released.
+   */
+  rubricScores?: RubricScore[];
+  /**
+   * AI-generated grading suggestion. NEVER auto-committed — an admin must
+   * explicitly accept it into `rubricScores`. Admin-only: never reaches a
+   * student client (stored in a separate admin-only table).
+   */
+  aiSuggestion?: AiSuggestion;
+}
+
+// ----------------------------------------------------------------------------
+// 6b. Rubrics + AI grading assist (written answers)
+// ----------------------------------------------------------------------------
+
+/**
+ * A single rubric criterion: a CONCEPT the student must demonstrate, not a
+ * model answer to string-match. `description` guides the AI's judgment.
+ */
+export interface RubricCriterion {
+  id: string;
+  label: string;
+  description?: string;
+  maxPoints: number;
+}
+
+/** A reusable rubric — attach the same one to many written questions. */
+export interface Rubric {
+  id: string;
+  name: string;
+  criteria: RubricCriterion[];
+  createdAt: string;
+}
+
+/** One human-committed criterion score on an answer. */
+export interface RubricScore {
+  criterionId: string;
+  points: number;
+}
+
+/** One AI-suggested criterion score, with the model's reasoning. */
+export interface AiCriterionScore {
+  criterionId: string;
+  points: number;
+  rationale: string;
+}
+
+/** The AI grading suggestion returned by the grade-suggest edge function. */
+export interface AiSuggestion {
+  scores: AiCriterionScore[];
+  overallRationale: string;
+  model: string;
+  at: string; // ISO
 }
 
 export type SubmissionStatus = "in_progress" | "submitted" | "released";
@@ -196,6 +259,38 @@ export interface Announcement {
   createdAt: string;
   /** studentIds that dismissed an unpinned announcement (mock persistence). */
   dismissedBy: string[];
+}
+
+// ----------------------------------------------------------------------------
+// 7b. Question flags (student ↔ admin messaging about a question)
+// ----------------------------------------------------------------------------
+
+export type FlagReason = "typo" | "ambiguous" | "technical" | "other";
+
+export type FlagStatus = "open" | "resolved";
+
+/**
+ * A student's report of a problem with a question. Raised mid-test (before a
+ * submission row exists — hence the nullable submissionId) or from the released
+ * result breakdown. The admin is the only party who can reply or resolve; RLS
+ * scopes reads to the owning student (see the question_flags migration).
+ */
+export interface QuestionFlag {
+  id: string;
+  /** null when the flag was raised during the test, before submitting. */
+  submissionId: string | null;
+  /** null if the question has since been deleted — questionPrompt still shows. */
+  questionId: string | null;
+  /** null if the test has since been deleted. */
+  testId: string | null;
+  /** Prompt snapshotted at flag time, so a deleted question still renders. */
+  questionPrompt: string | null;
+  studentId: string;
+  reason: FlagReason;
+  message: string; // <= 250 chars (enforced in the editor and the DB)
+  adminReply?: string;
+  status: FlagStatus;
+  createdAt: string;
 }
 
 // ----------------------------------------------------------------------------
@@ -257,6 +352,9 @@ export type NotificationType =
   | "cohort_changed"
   | "integrity_report"
   | "grade_updated"
+  | "question_flagged"
+  | "flag_reply"
+  | "flag_resolved"
   | "system";
 
 /**
