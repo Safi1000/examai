@@ -19,8 +19,14 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   const { session, logout, initializing, mustChangePassword } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const db = useDatabase();
   const ready = useDataReady();
+
+  // Slice-scoped: the persistent header only reads this student's row and their
+  // cohort, so it doesn't re-render on every unrelated realtime event.
+  const studentId = session?.studentId ?? null;
+  const student = useDatabase((d) => (studentId ? studentById(d, studentId) : null));
+  const cohortId = student?.cohortId ?? null;
+  const cohort = useDatabase((d) => (cohortId ? cohortById(d, cohortId) : null));
 
   useRealtimeSync();
 
@@ -32,11 +38,9 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
     return <div className="flex min-h-dvh items-center justify-center text-ink-3">Loading…</div>;
   }
 
-  const student = studentById(db, session.studentId);
   if (!student) {
     return <div className="flex min-h-dvh items-center justify-center text-ink-3">Session expired…</div>;
   }
-  const cohort = cohortById(db, student.cohortId);
 
   // The test runner is distraction-free — it hides the global nav itself.
   const inRunner = /^\/test\/[^/]+$/.test(pathname);

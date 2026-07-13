@@ -19,7 +19,7 @@
  *  - Privileged user provisioning goes through the `admin-users` edge function.
  * ============================================================================
  */
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import type {
   Announcement,
   Answer,
@@ -355,9 +355,40 @@ class Store {
   private notify() {
     this.listeners.forEach((l) => l());
   }
+  /**
+   * Apply a mutation with STRUCTURAL SHARING. Only the collections the mutator
+   * actually touches are deep-cloned (lazily, on first access); every untouched
+   * collection keeps its previous reference. This makes each commit cost
+   * O(changed slice) instead of O(whole database), and — combined with the
+   * `useDatabase(selector)` overload below — lets a component skip re-rendering
+   * when its slice is unchanged (unchanged slices keep identity). The top-level
+   * object is always replaced, so whole-db `useDatabase()` consumers still update
+   * exactly as before. Realtime refresh paths each touch a single collection, so
+   * a streamed submission/flag/lock update re-renders only that slice's readers.
+   */
   private commit(mutator: (draft: Database) => void) {
-    const next: Database = structuredClone(this.state);
-    mutator(next);
+    const base = this.state;
+    const touched = new Map<string, unknown>();
+    const draft = {} as Database;
+    for (const k of Object.keys(base)) {
+      Object.defineProperty(draft, k, {
+        enumerable: true,
+        configurable: true,
+        // Reading hands the mutator a private deep clone (cached), marking the
+        // collection changed; reassigning stores the new value directly.
+        get() {
+          if (!touched.has(k)) touched.set(k, structuredClone((base as unknown as Record<string, unknown>)[k]));
+          return touched.get(k);
+        },
+        set(v: unknown) {
+          touched.set(k, v);
+        },
+      });
+    }
+    mutator(draft);
+    if (touched.size === 0) return; // nothing changed ⇒ no new snapshot, no re-render
+    const next: Database = { ...base };
+    for (const [k, v] of touched) (next as unknown as Record<string, unknown>)[k] = v;
     this.state = next;
     this.notify();
   }
@@ -1859,10 +1890,36 @@ export function getStore(): Store {
   return storeSingleton;
 }
 
-/** Reactive snapshot of the whole database. */
-export function useDatabase(): Database {
+/**
+ * Reactive selection of a slice of the database. With the store's structural
+ * sharing, the component only re-renders when the selected slice actually
+ * changes — not on every unrelated mutation. The selector should return a
+ * STABLE reference for unchanged data (e.g. `d => d.tests`, or a `find`/element
+ * over one slice); do NOT build a fresh object/array inside the selector, or it
+ * will produce a new reference every commit and re-render each time.
+ */
+export function useDatabase<T>(selector: (db: Database) => T): T;
+/** Reactive snapshot of the whole database. (Kept last so `ReturnType` = Database.) */
+export function useDatabase(): Database;
+export function useDatabase<T>(selector?: (db: Database) => T): T | Database {
   const store = getStore();
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
+  // Cache the last (snapshot → selection). Returning a stable value for the same
+  // underlying state is required by useSyncExternalStore (prevents tearing/loops);
+  // Object.is-preservation lets an unchanged slice avoid a re-render entirely.
+  const memo = useRef<{ snap: Database; value: unknown } | null>(null);
+  const getSelection = (): unknown => {
+    const snap = store.getSnapshot();
+    const last = memo.current;
+    if (last && last.snap === snap) return last.value;
+    const value = selector ? selector(snap) : snap;
+    if (last && Object.is(last.value, value)) {
+      memo.current = { snap, value: last.value };
+      return last.value;
+    }
+    memo.current = { snap, value };
+    return value;
+  };
+  return useSyncExternalStore(store.subscribe, getSelection, getSelection) as T | Database;
 }
 
 /** Whether the cache has finished its initial Supabase hydration. */

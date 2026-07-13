@@ -12,6 +12,7 @@ import { ExamLockScreen } from "@/components/student/ExamLockScreen";
 import { useDraftAutosave, loadDraft, clearDraft } from "@/hooks/useDraftAutosave";
 import { useToast } from "@/components/toast";
 import { CountdownTimer } from "@/components/student/CountdownTimer";
+import { TestSecurityInstructions } from "@/components/student/TestSecurityInstructions";
 import { QuestionView } from "@/components/student/QuestionView";
 import { Button, Modal, Pill, Icon } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/Button";
@@ -45,11 +46,18 @@ export default function TestRunnerPage() {
   const [boot] = useState(() => {
     const d = student && test ? loadDraft(student.id, test.id) : null;
     return {
-      startedAt: d?.startedAt ?? new Date().toISOString(),
+      // null until the student acknowledges the security briefing — the clock
+      // must not start behind it. A resumed draft carries its original start.
+      startedAt: d?.startedAt ?? null,
       answers: d?.answers ?? null,
       index: d?.currentIndex ?? 0,
     };
   });
+
+  // Acknowledgement gate. `startedAt` stays null (briefing shown, timer off)
+  // until the student taps "start"; a resumed draft is already past this.
+  const [startedAt, setStartedAt] = useState<string | null>(boot.startedAt);
+  const acknowledged = startedAt !== null;
 
   const [answers, setAnswers] = useState<Answer[]>(() => {
     if (!test) return [];
@@ -66,11 +74,11 @@ export default function TestRunnerPage() {
   const prevState = useRef<string>("normal");
 
   const endMs = useMemo(() => {
-    if (!test) return null;
-    const byDuration = new Date(boot.startedAt).getTime() + test.durationMinutes * 60_000;
+    if (!test || !startedAt) return null; // no start time yet ⇒ timer stays off
+    const byDuration = new Date(startedAt).getTime() + test.durationMinutes * 60_000;
     const byClose = new Date(test.closesAt).getTime();
     return Math.min(byDuration, byClose);
-  }, [test, boot.startedAt]);
+  }, [test, startedAt]);
 
   // Exam lock state. Server-owned: a trigger writes it, only an admin clears it,
   // and the submissions RLS policy refuses a locked student regardless of the UI.
@@ -79,24 +87,24 @@ export default function TestRunnerPage() {
 
   const doSubmit = useCallback(
     async (auto: boolean) => {
-      if (submittedRef.current || !test || !student || locked) return;
+      if (submittedRef.current || !test || !student || locked || !startedAt) return;
       submittedRef.current = true;
       const duration = Math.min(
         test.durationMinutes * 60,
-        Math.round((Date.now() - new Date(boot.startedAt).getTime()) / 1000),
+        Math.round((Date.now() - new Date(startedAt).getTime()) / 1000),
       );
       await store.submitTest({
         testId: test.id,
         studentId: student.id,
         answers,
-        startedAt: boot.startedAt,
+        startedAt,
         autoSubmitted: auto,
         durationSeconds: duration,
       });
       clearDraft(student.id, test.id);
       router.replace(`/test/${test.id}/submitted`);
     },
-    [test, student, answers, store, router, boot.startedAt, locked],
+    [test, student, answers, store, router, startedAt, locked],
   );
 
   const { remaining, state } = useCountdown(endMs, () => doSubmit(true));
@@ -106,8 +114,8 @@ export default function TestRunnerPage() {
     testId: test?.id ?? "",
     answers,
     currentIndex: index,
-    startedAt: boot.startedAt,
-    enabled: !!test && !!student && !existing && window === "open" && !locked,
+    startedAt: startedAt ?? "",
+    enabled: !!test && !!student && !existing && window === "open" && !locked && acknowledged,
   });
 
   // Report integrity breaches. The server decides whether that locks the exam.
@@ -120,7 +128,7 @@ export default function TestRunnerPage() {
   );
 
   useExamSecurity({
-    enabled: !!student && !!test && !!visible && !existing && window === "open" && !locked,
+    enabled: !!student && !!test && !!visible && !existing && window === "open" && !locked && acknowledged,
     onViolation,
   });
 
@@ -149,6 +157,17 @@ export default function TestRunnerPage() {
   if (window === "closed") return <RunnerNotice title="Test closed" message="You missed the window." />;
   if (test.questions.length === 0) {
     return <RunnerNotice title="No questions yet" message="This test currently has no questions." />;
+  }
+  // Security briefing gate — a fresh attempt sees the rules (and no running
+  // timer, no question) until they acknowledge; a resumed draft skips straight
+  // through because startedAt is already set.
+  if (!acknowledged) {
+    return (
+      <TestSecurityInstructions
+        test={test}
+        onStart={() => setStartedAt(new Date().toISOString())}
+      />
+    );
   }
 
   // Defensive: after clamping this is always in-bounds, but never render an

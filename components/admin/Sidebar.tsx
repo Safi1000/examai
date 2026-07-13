@@ -25,7 +25,9 @@ const NAV = [
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const db = useDatabase();
+  // Only the cohorts slice — so the always-visible sidebar doesn't re-render on
+  // every unrelated realtime event (submissions, flags, violations, …).
+  const cohorts = useDatabase((d) => d.cohorts);
   const { cohortId, setCohortId } = useAdminFilter();
 
   return (
@@ -71,7 +73,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           <span className="h-2.5 w-2.5 rounded-full border border-border-strong" />
           All cohorts
         </button>
-        {db.cohorts.map((c) => (
+        {cohorts.map((c) => (
           <button
             key={c.id}
             onClick={() => setCohortId(cohortId === c.id ? null : c.id)}
