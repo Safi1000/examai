@@ -14,6 +14,11 @@ import type {
   NoteAssignment,
   Question,
   QuestionBankItem,
+  ExamLock,
+  ExamViolation,
+  FlagMessage,
+  QuestionFlag,
+  Rubric,
   Student,
   SubjectItem,
   Submission,
@@ -32,6 +37,15 @@ export interface Database {
   subjects: SubjectItem[];
   notes: Note[];
   noteAssignments: NoteAssignment[];
+  /** Student-raised question flags (RLS: own rows for a student, all for admin). */
+  questionFlags: QuestionFlag[];
+  rubrics: Rubric[];
+  /** Ordered conversation turns per flag (RLS: own rows for a student, all for admin). */
+  flagMessages: FlagMessage[];
+  /** Exam lock state per student+test (RLS: own rows for a student, all for admin). */
+  examLocks: ExamLock[];
+  /** Integrity violation history (RLS: own rows for a student, all for admin). */
+  examViolations: ExamViolation[];
   /** Demo-only. Real admin auth is Supabase Auth; the live store omits this. */
   adminPassword?: string;
 }
@@ -377,6 +391,11 @@ export function createSeed(now: number = Date.now()): Database {
     subjects: [],
     notes: [],
     noteAssignments: [],
+    questionFlags: [],
+    rubrics: [],
+    flagMessages: [],
+    examLocks: [],
+    examViolations: [],
     adminPassword: "admin2026",
   };
 }

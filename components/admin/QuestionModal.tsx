@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { QuestionCommon, QuestionType, QuestionVariant } from "@/types";
-import { Modal, Button, Input, Textarea, Label, Checkbox } from "@/components/ui";
+import { Modal, Button, Input, Textarea, Label, Checkbox, Select } from "@/components/ui";
+import { useDatabase } from "@/lib/data/store";
+import { RubricModal } from "@/components/admin/RubricModal";
 import { cn } from "@/lib/cn";
 
 /**
@@ -36,7 +38,10 @@ export function QuestionModal({
   const [correctIndex, setCorrectIndex] = useState(0);
   const [maxLength, setMaxLength] = useState(400);
   const [showCounter, setShowCounter] = useState(true);
+  const [rubricId, setRubricId] = useState("");
+  const [rubricModalOpen, setRubricModalOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const db = useDatabase();
 
   // Hydrate when (re)opened.
   useEffect(() => {
@@ -58,6 +63,9 @@ export function QuestionModal({
       if (initial.type === "text") {
         setMaxLength(initial.maxLength ?? 400);
         setShowCounter(initial.showCounter ?? true);
+        setRubricId(initial.rubricId ?? "");
+      } else {
+        setRubricId("");
       }
     } else {
       setType("mcq");
@@ -69,6 +77,7 @@ export function QuestionModal({
       setCorrectIndex(0);
       setMaxLength(400);
       setShowCounter(true);
+      setRubricId("");
     }
   }, [open, initial]);
 
@@ -90,7 +99,13 @@ export function QuestionModal({
     if (type === "mcq") {
       draft = { ...common, type: "mcq", options: options.map((o) => o.trim()), correctIndex } as QuestionDraft;
     } else if (type === "text") {
-      draft = { ...common, type: "text", maxLength, showCounter } as QuestionDraft;
+      draft = {
+        ...common,
+        type: "text",
+        maxLength,
+        showCounter,
+        rubricId: rubricId || undefined,
+      } as QuestionDraft;
     } else {
       draft = { ...common, type: "photo" } as QuestionDraft;
     }
@@ -182,12 +197,34 @@ export function QuestionModal({
         )}
 
         {type === "text" && (
-          <div className="grid grid-cols-2 items-end gap-3">
-            <Input label="Max length" type="number" min={50} value={maxLength} onChange={(e) => setMaxLength(Number(e.target.value))} />
-            <div className="pb-3">
-              <Checkbox checked={showCounter} onChange={setShowCounter} label="Show character counter" />
+          <>
+            <div className="grid grid-cols-2 items-end gap-3">
+              <Input label="Max length" type="number" min={50} value={maxLength} onChange={(e) => setMaxLength(Number(e.target.value))} />
+              <div className="pb-3">
+                <Checkbox checked={showCounter} onChange={setShowCounter} label="Show character counter" />
+              </div>
             </div>
-          </div>
+            <div>
+              <div className="flex items-end gap-2">
+                <Select
+                  label="Grading rubric (optional)"
+                  value={rubricId}
+                  onChange={(e) => setRubricId(e.target.value)}
+                >
+                  <option value="">No rubric — grade with a single mark</option>
+                  {db.rubrics.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </Select>
+                <Button type="button" variant="secondary" size="sm" className="mb-0.5 shrink-0" onClick={() => setRubricModalOpen(true)}>
+                  New rubric
+                </Button>
+              </div>
+              <p className="mt-1.5 text-xs text-ink-3">
+                A rubric enables per-criterion grading and AI grade suggestions for this written answer.
+              </p>
+            </div>
+          </>
         )}
 
         {type === "photo" && (
@@ -196,6 +233,12 @@ export function QuestionModal({
           </p>
         )}
       </div>
+
+      <RubricModal
+        open={rubricModalOpen}
+        onClose={() => setRubricModalOpen(false)}
+        onSaved={(id) => setRubricId(id)}
+      />
     </Modal>
   );
 }

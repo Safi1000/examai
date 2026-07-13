@@ -31,6 +31,7 @@ export default function AdminTestsPage() {
   const [subject, setSubject] = useState("all");
   const [status, setStatus] = useState("all");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const nowMs = useNow();
 
   const subjects = useMemo(() => Array.from(new Set(db.tests.map((t) => t.subject))).sort(), [db.tests]);
@@ -139,8 +140,13 @@ export default function AdminTestsPage() {
             <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancel</Button>
             <Button
               variant="danger"
-              onClick={() => {
-                if (deleteId) store.deleteTest(deleteId);
+              loading={deleting}
+              onClick={async () => {
+                if (!deleteId) return;
+                setDeleting(true);
+                const ok = await store.deleteTest(deleteId);
+                setDeleting(false);
+                if (!ok) return; // the store surfaced the real reason; keep the dialog open
                 setDeleteId(null);
                 toast("Test deleted.", "success");
               }}

@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import type { Answer } from "@/types";
+import type { Answer, ViolationType } from "@/types";
 import { useAuth } from "@/lib/auth-context";
 import { useDatabase, useStore } from "@/lib/data/store";
-import { studentById, testById, submissionFor } from "@/lib/data/selectors";
+import { studentById, testById, submissionFor, examLockFor } from "@/lib/data/selectors";
 import { useCountdown } from "@/hooks/useCountdown";
+import { useExamSecurity } from "@/hooks/useExamSecurity";
+import { ExamLockScreen } from "@/components/student/ExamLockScreen";
 import { useDraftAutosave, loadDraft, clearDraft } from "@/hooks/useDraftAutosave";
 import { useToast } from "@/components/toast";
 import { CountdownTimer } from "@/components/student/CountdownTimer";
@@ -70,9 +72,14 @@ export default function TestRunnerPage() {
     return Math.min(byDuration, byClose);
   }, [test, boot.startedAt]);
 
+  // Exam lock state. Server-owned: a trigger writes it, only an admin clears it,
+  // and the submissions RLS policy refuses a locked student regardless of the UI.
+  const lock = student && test ? examLockFor(db, student.id, test.id) : null;
+  const locked = lock?.status === "locked";
+
   const doSubmit = useCallback(
     async (auto: boolean) => {
-      if (submittedRef.current || !test || !student) return;
+      if (submittedRef.current || !test || !student || locked) return;
       submittedRef.current = true;
       const duration = Math.min(
         test.durationMinutes * 60,
@@ -89,7 +96,7 @@ export default function TestRunnerPage() {
       clearDraft(student.id, test.id);
       router.replace(`/test/${test.id}/submitted`);
     },
-    [test, student, answers, store, router, boot.startedAt],
+    [test, student, answers, store, router, boot.startedAt, locked],
   );
 
   const { remaining, state } = useCountdown(endMs, () => doSubmit(true));
@@ -100,7 +107,21 @@ export default function TestRunnerPage() {
     answers,
     currentIndex: index,
     startedAt: boot.startedAt,
-    enabled: !!test && !!student && !existing && window === "open",
+    enabled: !!test && !!student && !existing && window === "open" && !locked,
+  });
+
+  // Report integrity breaches. The server decides whether that locks the exam.
+  const onViolation = useCallback(
+    (type: ViolationType) => {
+      if (!student || !test) return;
+      void store.recordViolation({ studentId: student.id, testId: test.id, type });
+    },
+    [student, test, store],
+  );
+
+  useExamSecurity({
+    enabled: !!student && !!test && !!visible && !existing && window === "open" && !locked,
+    onViolation,
   });
 
   // Final-five and final-minute warnings (announced once each).
@@ -120,6 +141,9 @@ export default function TestRunnerPage() {
   if (!student || !test || !visible) {
     return <RunnerNotice title="Test unavailable" message="Something's wrong. Head back and try again." />;
   }
+  // Locked takes priority over every other state: no questions, no navigation,
+  // no submit. Clears itself when the teacher unlocks (Realtime → re-render).
+  if (locked && lock) return <ExamLockScreen lock={lock} testTitle={test.title} />;
   if (existing) return <RunnerNotice title="Already submitted" message="You've already done this one." />;
   if (window === "future") return <RunnerNotice title="Not open yet" message="Not live yet. Check back at the start time." />;
   if (window === "closed") return <RunnerNotice title="Test closed" message="You missed the window." />;
@@ -170,7 +194,12 @@ export default function TestRunnerPage() {
 
       <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-6">
         <div key={q.id} className="animate-fade-up">
-          <QuestionView question={q} answer={answer} onChange={update} />
+          <QuestionView
+            question={q}
+            answer={answer}
+            onChange={update}
+            flagContext={{ studentId: student.id, testId: test.id }}
+          />
         </div>
       </main>
 

@@ -121,7 +121,7 @@ export default function TestEditorPage() {
   // existing tests keep the "at least one question" rule before saving.
   const canSave = form.title.trim().length > 0 && !releaseError && (isNew || questions.length > 0);
 
-  function saveSettings() {
+  async function saveSettings() {
     if (!form || !canSave) return;
     if (form.releaseAt && new Date(form.releaseAt).getTime() < Date.now()) {
       toast("Release time can't be in the past.", "error");
@@ -141,8 +141,11 @@ export default function TestEditorPage() {
       status: form.status,
     };
     if (isNew) {
-      // The insert happens here — never on opening the editor.
-      const newId = store.addTest(settings);
+      // The insert happens here — never on opening the editor. AWAIT it: the
+      // questions below carry test_id as a foreign key, so the test row has to be
+      // committed first or they'd race it and fail questions_test_id_fkey.
+      const newId = await store.addTest(settings);
+      if (!newId) return; // the store surfaced the real reason and rolled back
       localQuestions.forEach((q) => store.addQuestion(newId, stripQuestion(q)));
       toast("Test created.", "success");
       router.replace(`/admin/tests/${newId}`);

@@ -73,6 +73,7 @@ Deno.serve(async (req: Request) => {
             username: String(username).trim(),
             email: email || null,
             cohort_id: cohortId || null,
+            must_change_password: true, // temp password — force a change on first login
           })
           .select()
           .single();
@@ -81,6 +82,64 @@ Deno.serve(async (req: Request) => {
           return json({ error: iErr.message }, 400);
         }
         return json({ student: row });
+      }
+
+      case "bulk-create": {
+        // Bulk roster import (Feature 3). Same privileged path as "create", just
+        // looped: each student gets an auth user + a students row, and any
+        // failure is isolated (rolled back) and reported per-username so the
+        // admin sees exactly which rows landed. The client chunks large uploads.
+        const students = Array.isArray(body.students) ? body.students : null;
+        if (!students) return json({ error: "students array required" }, 400);
+        if (students.length === 0) return json({ error: "no students provided" }, 400);
+        if (students.length > 200) return json({ error: "too many students in one request (max 200)" }, 400);
+
+        const results: {
+          username: string;
+          status: "created" | "failed";
+          reason?: string;
+          student?: unknown;
+        }[] = [];
+
+        for (const s of students) {
+          const username = String(s?.username ?? "").trim();
+          const password = String(s?.password ?? "");
+          if (!username || !password) {
+            results.push({ username, status: "failed", reason: "username and password required" });
+            continue;
+          }
+
+          const { data: created, error: cErr } = await admin.auth.admin.createUser({
+            email: loginEmail(username),
+            password,
+            email_confirm: true,
+            app_metadata: { role: "student" },
+          });
+          if (cErr || !created?.user) {
+            results.push({ username, status: "failed", reason: cErr?.message ?? "auth create failed" });
+            continue;
+          }
+
+          const { data: row, error: iErr } = await admin
+            .from("students")
+            .insert({
+              user_id: created.user.id,
+              username,
+              email: s?.email || null,
+              cohort_id: s?.cohortId || null,
+            })
+            .select()
+            .single();
+          if (iErr) {
+            await admin.auth.admin.deleteUser(created.user.id); // roll back the auth user
+            results.push({ username, status: "failed", reason: iErr.message });
+            continue;
+          }
+
+          results.push({ username, status: "created", student: row });
+        }
+
+        return json({ success: true, results });
       }
 
       case "update": {
