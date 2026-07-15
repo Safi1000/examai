@@ -12,6 +12,7 @@ import type {
   Cohort,
   Note,
   NoteAssignment,
+  PracticeItem,
   Question,
   QuestionBankItem,
   ExamLock,
@@ -33,6 +34,8 @@ export interface Database {
   submissions: Submission[];
   announcements: Announcement[];
   bank: QuestionBankItem[];
+  /** Ungraded practice pool (Feature 2). Student-readable incl. keys — see RLS. */
+  practiceQuestions: PracticeItem[];
   classes: ClassItem[];
   subjects: SubjectItem[];
   notes: Note[];
@@ -387,6 +390,7 @@ export function createSeed(now: number = Date.now()): Database {
     submissions,
     announcements,
     bank,
+    practiceQuestions: [],
     classes: [],
     subjects: [],
     notes: [],

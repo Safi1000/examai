@@ -31,6 +31,7 @@ import type {
   FlagMessage,
   Note,
   NoteAssignment,
+  PracticeItem,
   Question,
   QuestionBankItem,
   QuestionCommon,
@@ -82,6 +83,7 @@ const EMPTY: Database = {
   submissions: [],
   announcements: [],
   bank: [],
+  practiceQuestions: [],
   classes: [],
   subjects: [],
   notes: [],
@@ -294,6 +296,17 @@ function mapBank(r: Row): QuestionBankItem {
   return { ...base, type: "photo" };
 }
 
+const mapPractice = (r: Row): PracticeItem => ({
+  id: r.id as string,
+  subject: r.subject as string,
+  topic: r.topic as string,
+  prompt: r.prompt as string,
+  marks: (r.marks as number) ?? 1,
+  options: (r.options as string[]) ?? [],
+  correctIndex: (r.correct_index as number) ?? 0,
+  explanation: (r.explanation as string) ?? undefined,
+});
+
 // Domain -> insert/update row shapes.
 function questionToRow(testId: string, id: string, q: Omit<Question, "id" | "order">, order: number): Row {
   const v = q as QuestionInput;
@@ -445,7 +458,7 @@ class Store {
   /** Hydrate the cache from Supabase (scoped by RLS for the current session). */
   async load() {
     const sb = supabase();
-    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg, rub, aiSug, lks, fmsg, viol] = await Promise.all([
+    const [coh, stu, tst, sub, ann, bnk, keys, cls, subj, cCls, cSubj, sCls, sSubj, nts, nAssigns, flg, rub, aiSug, lks, fmsg, viol, prac] = await Promise.all([
       sb.from("cohorts").select("*").order("created_at"),
       sb.from("students").select("*").order("created_at"),
       sb.from("tests").select("*, questions(*)").order("created_at"),
@@ -467,6 +480,7 @@ class Store {
       sb.from("exam_locks").select("*").order("locked_at", { ascending: false }),
       sb.from("flag_messages").select("*").order("created_at"),
       sb.from("exam_violations").select("*").order("created_at"),
+      sb.from("practice_questions").select("*").order("created_at"), // ungraded pool; keys are student-readable
     ]);
 
     const firstError = [coh, stu, tst, sub, ann, bnk].find((r) => r.error)?.error;
@@ -545,6 +559,7 @@ class Store {
       submissions: ((sub.data as Row[]) ?? []).map((r) => mapSubmission(r, aiByAnswer)),
       announcements: ((ann.data as Row[]) ?? []).map(mapAnnouncement),
       bank: ((bnk.data as Row[]) ?? []).map(mapBank),
+      practiceQuestions: ((prac.data as Row[]) ?? []).map(mapPractice),
       classes: ((cls.data as Row[]) ?? []).map(mapClass),
       subjects: ((subj.data as Row[]) ?? []).map(mapSubject),
       notes: ((nts.data as Row[]) ?? []).map(mapNote),

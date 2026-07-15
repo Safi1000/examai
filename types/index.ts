@@ -120,6 +120,25 @@ export type Question = QuestionCommon & QuestionVariant & { order: number };
 /** A reusable bank question (carries subject, no order until imported). */
 export type QuestionBankItem = QuestionCommon & QuestionVariant & { subject: string };
 
+/**
+ * A practice question (Feature 2 — ungraded self-assessment). MCQ-only so it can
+ * be auto-scored instantly on the client. Unlike the graded bank/question_keys —
+ * which are admin-only and whose keys never reach a student — a practice item's
+ * `correctIndex` is INTENTIONALLY student-readable (its RLS allows it), because
+ * it is never used for a graded submission. `explanation` is shown after the
+ * student answers. See the practice_questions migration for the security note.
+ */
+export interface PracticeItem {
+  id: string;
+  subject: string;
+  topic: string;
+  prompt: string;
+  marks: number;
+  options: string[];
+  correctIndex: number;
+  explanation?: string;
+}
+
 // ----------------------------------------------------------------------------
 // 4. Tests
 // ----------------------------------------------------------------------------

@@ -47,6 +47,7 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
 
   const links = [
     { href: "/dashboard", label: "Dashboard", icon: <Icon.Dashboard className="h-[18px] w-[18px]" /> },
+    { href: "/practice", label: "Practice", icon: <Icon.Layers className="h-[18px] w-[18px]" /> },
     { href: "/progress", label: "Progress", icon: <Icon.Chart className="h-[18px] w-[18px]" /> },
     { href: "/notes", label: "Notes", icon: <Icon.Doc className="h-[18px] w-[18px]" /> },
     { href: "/settings", label: "Settings", icon: <Icon.Palette className="h-[18px] w-[18px]" /> },

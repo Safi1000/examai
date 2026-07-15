@@ -7,6 +7,7 @@ import type {
   ExamLock,
   ExamViolation,
   FlagMessage,
+  PracticeItem,
   QuestionFlag,
   Student,
   Submission,
@@ -89,6 +90,55 @@ export function testStats(db: Database, test: Test): TestStats {
     averagePercent,
     completionPercent: eligible > 0 ? Math.round((subs.length / eligible) * 100) : 0,
   };
+}
+
+// ---- Practice mode (ungraded self-assessment) ------------------------------
+
+/** Distinct subjects that have practice questions, alphabetical. */
+export function practiceSubjects(db: Database): string[] {
+  return [...new Set(db.practiceQuestions.map((q) => q.subject))].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Practice subjects offered to a student. When the student has subject
+ * enrolments we intersect with those subjects' names; a student with no
+ * enrolments (or no overlap) sees every practice subject. Practice is ungraded,
+ * so this scoping is a convenience for the picker, never a security boundary.
+ */
+export function practiceSubjectsForStudent(db: Database, student: Student): string[] {
+  const all = practiceSubjects(db);
+  if (!student.subjectIds.length) return all;
+  const enrolledNames = new Set(
+    db.subjects.filter((s) => student.subjectIds.includes(s.id)).map((s) => s.name),
+  );
+  const scoped = all.filter((s) => enrolledNames.has(s));
+  return scoped.length ? scoped : all;
+}
+
+/** How many practice questions exist for a subject (drives the picker copy). */
+export function practiceCountFor(db: Database, subject: string): number {
+  return db.practiceQuestions.filter((q) => q.subject === subject).length;
+}
+
+/** Fisher–Yates shuffle (returns a copy). */
+function shuffled<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Build a randomised practice quiz of up to `count` items for a subject. Returns
+ * a fresh array — call it from an event handler / state initialiser, never
+ * inside a render-time `useDatabase` selector (it produces a new reference every
+ * call and would defeat the store's structural sharing).
+ */
+export function practiceQuizFor(db: Database, subject: string, count: number): PracticeItem[] {
+  const pool = db.practiceQuestions.filter((q) => q.subject === subject);
+  return shuffled(pool).slice(0, Math.max(1, count));
 }
 
 // ---- Exam security ---------------------------------------------------------

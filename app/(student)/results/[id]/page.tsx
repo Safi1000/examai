@@ -10,6 +10,7 @@ import { Card, Badge, Pill, Icon, EmptyState } from "@/components/ui";
 import { buttonClasses } from "@/components/ui/Button";
 import { QuestionFlagControl } from "@/components/flags/QuestionFlagControl";
 import { ResultPending } from "@/components/student/ResultPending";
+import { ResultPdfActions } from "@/components/pdf/ResultPdfActions";
 import { gradeSubmission, gradeLetter, gradeRole } from "@/lib/grading";
 import { formatDuration, formatTimestamp } from "@/lib/time";
 import { cn } from "@/lib/cn";
@@ -90,6 +91,8 @@ export default function ResultsPage() {
             {formatDuration(submission.durationSeconds ?? 0)}
           </span>
         </div>
+
+        <ResultPdfActions student={student} test={test} submission={submission} rubrics={db.rubrics} />
       </Card>
 
       <h2 className="mb-2.5 mt-7 text-sm font-bold uppercase tracking-wide text-ink-2">
